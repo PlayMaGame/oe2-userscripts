@@ -5,29 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OE2 Userscripts Install</title>
 <style>
-body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
 h1 { color: #e63946; }
-ul { list-style: none; padding: 0; }
-li { margin: .5rem 0; padding: .75rem; background: #f1faee; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
-a { background: #457b9d; color: #fff; text-decoration: none; padding: .4rem .8rem; border-radius: 4px; font-size: .9rem; }
+ul { list-style: none; padding: 0; column-count: 2; column-gap: 1rem; }
+li { margin: 0 0 .4rem 0; padding: .5rem .6rem; background: #f1faee; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; break-inside: avoid; }
+a { background: #457b9d; color: #fff; text-decoration: none; padding: .3rem .7rem; border-radius: 4px; font-size: .8rem; white-space: nowrap; }
 a:hover { background: #1d3557; }
-code { font-size: .85rem; }
+code { font-size: .8rem; word-break: break-all; }
+h2 { margin-top: 2rem; }
 </style>
 </head>
 <body>
 <h1>OE2 Userscripts</h1>
 <p>Click <strong>Install</strong> on each script — Tampermonkey/Violentmonkey will prompt you.</p>
+
+<h2>Active</h2>
 <ul>
 <li><span><code>afk-warning.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/afk-warning.user.js">Install</a></li>
+<li><span><code>auto-pilot-panel-centering.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/auto-pilot-panel-centering.user.js">Install</a></li>
+<li><span><code>default-filters.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/default-filters.user.js">Install</a></li>
 <li><span><code>exit-countdown-beep.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/exit-countdown-beep.user.js">Install</a></li>
-<li><span><code>oe-market-alerts.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/oe-market-alerts.user.js">Install</a></li>
-<li><span><code>oe2-combat-hp.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/oe2-combat-hp.user.js">Install</a></li>
+<li><span><code>hide-hud.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/hide-hud.user.js">Install</a></li>
+<li><span><code>hide-lables.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/hide-lables.user.js">Install</a></li>
+<li><span><code>JOB target highlighter.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/JOB%20target%20highlighter.user.js">Install</a></li>
+<li><span><code>jobs-navigation-qol.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/jobs-navigation-qol.user.js">Install</a></li>
 <li><span><code>oe_apdock.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/oe_apdock.user.js">Install</a></li>
+<li><span><code>oe2-combat-hp.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/oe2-combat-hp.user.js">Install</a></li>
+<li><span><code>oe-market-alerts.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/oe-market-alerts.user.js">Install</a></li>
+<li><span><code>ping.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/ping.user.js">Install</a></li>
+<li><span><code>shields-off-warning.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/shields-off-warning.user.js">Install</a></li>
+<li><span><code>system-explorer-filter.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/system-explorer-filter.user.js">Install</a></li>
 </ul>
-<h2>Disabled (install manually if needed)</h2>
+
+<h2>Disabled / Manual</h2>
 <ul>
+<li><span><code>combat_intel.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/combat_intel.user.js">Install</a></li>
+<li><span><code>combat_log.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/combat_log.user.js">Install</a></li>
+<li><span><code>dock-on-arrival.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/dock-on-arrival.user.js">Install</a></li>
+<li><span><code>force-tactical-filters.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/force-tactical-filters.user.js">Install</a></li>
+<li><span><code>game-notification-injector.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/game-notification-injector.user.js">Install</a></li>
+<li><span><code>hide-planets-text.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/hide-planets-text.user.js">Install</a></li>
+<li><span><code>jobs-navigation-qol.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/jobs-navigation-qol.user.js">Install</a></li>
 <li><span><code>outerempires_capture.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/outerempires_capture.user.js">Install</a></li>
 <li><span><code>outerempires_preview.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/outerempires_preview.user.js">Install</a></li>
+<li><span><code>ReloadPage.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/ReloadPage.user.js">Install</a></li>
+<li><span><code>survey-assistant.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/survey-assistant.user.js">Install</a></li>
+<li><span><code>twitch-scraper.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/twitch-scraper.user.js">Install</a></li>
+<li><span><code>xp-counter.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/xp-counter.user.js">Install</a></li>
+<li><span><code>zoomer.user.js</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/projectas%20zoom/zoomer.user.js">Install</a></li>
 </ul>
 <p style="margin-top:2rem;color:#666;font-size:.85rem">Make sure you have <a href="https://www.tampermonkey.net/">Tampermonkey</a> or <a href="https://violentmonkey.github.io/">Violentmonkey</a> installed in Firefox Nightly.</p>
 </body>
