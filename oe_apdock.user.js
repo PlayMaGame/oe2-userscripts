@@ -26,6 +26,7 @@
   let dockOnNextArrival = false;
   let warpOnNextArrival = false;
   let lastArrivalState  = false;
+  let lastApEngaged     = false;
   let dockTimeout       = null;
   let warpTimeout       = null;
 
@@ -179,10 +180,30 @@
     resetBtn('apwarp-btn');
   }
 
+  // ── Auto-close hex tabs when AP engaged ──────────────────────────────────
+
+  function closeHexTabs() {
+    const apEngaged = !!document.querySelector('.route-stop-btn');
+
+    if (apEngaged && !lastApEngaged) {
+      const closeBtn = document.getElementById('ui_hex_left_close');
+      if (closeBtn && closeBtn.style.display !== 'none') { closeBtn.click(); }
+
+      const galaxyHex = document.getElementById('ui_galaxy_hex');
+      if (galaxyHex && galaxyHex.classList.contains('galaxy_map_open')) { galaxyHex.click(); }
+
+      const soeHex = document.getElementById('ui_soe_hex');
+      if (soeHex && soeHex.classList.contains('active')) { soeHex.click(); }
+    }
+
+    lastApEngaged = apEngaged;
+  }
+
   // ── Polling ──────────────────────────────────────────────────────────────────
 
   function poll() {
     injectButton();
+    closeHexTabs();
 
     const arrived = hasArrived();
 
