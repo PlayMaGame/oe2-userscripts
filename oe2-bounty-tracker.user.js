@@ -159,7 +159,6 @@
         for (var ti = 0; ti < targets.length; ti++) {
             if (!targets[ti].done && targets[ti].name.toLowerCase() === killedClass) {
                 targets[ti].done = true;
-                saveFullState();
                 render();
                 break;
             }
@@ -215,7 +214,7 @@
         panel = document.createElement('div');
         panel.id = 'oe2-bounty-panel';
         panel.style.cssText = [
-            'position: fixed', 'z-index: 199', 'top: 80px',
+            'position: fixed', 'z-index: 280', 'top: 80px',
             'left: calc(50% - 500px)', 'transform: translateX(-50%)',
             'padding: 4px 0', 'font-family: Rajdhani, "Segoe UI", sans-serif',
             'color: #c8d6e5', 'font-size: 15px', 'min-width: 220px',
@@ -269,21 +268,8 @@
             return;
         }
         console.log('[Bounty] active #' + ref + ' -> ' + job.jobName + ' [' + job.ships.join(', ') + ']');
-        var freshTargets = job.ships.map(function (n) { return { name: n, done: false }; });
-        var cached = loadFullState(ref);
-        if (cached && cached.targets) {
-            for (var fi = 0; fi < freshTargets.length; fi++) {
-                for (var ci = 0; ci < cached.targets.length; ci++) {
-                    if (freshTargets[fi].name === cached.targets[ci].name && cached.targets[ci].done) {
-                        freshTargets[fi].done = true;
-                        break;
-                    }
-                }
-            }
-        }
         currentRef = ref;
-        targets = freshTargets;
-        saveFullState();
+        targets = job.ships.map(function (n) { return { name: n, done: false }; });
         render();
     }
 

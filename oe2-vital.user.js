@@ -28,9 +28,7 @@
     var isExpanded = false;
     var isVisible = false;
     var lastShipData = null;
-    var isAutoHidden = false;
     var isUserHidden = false;
-    var hudObserver = null;
     // Intercept game's own API traffic to capture base URL + auth token + character ID
     (function () {
         var origFetch = window.fetch;
@@ -155,33 +153,7 @@
         vtgBtn.style.right = (window.innerWidth - r.right - 20) + 'px';
         vtgBtn.style.bottom = (window.innerHeight - r.bottom - 2) + 'px';
     }
-    function isHudVisible() {
-        var el = document.querySelector('#ui-component');
-        if (!el) return true;
-        var style = getComputedStyle(el);
-        return el.offsetParent !== null && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-    }
-    function setupHudObserver() {
-        var hud = document.querySelector('#ui-component');
-        if (!hud || hudObserver) return;
-        hudObserver = new MutationObserver(function () {
-            if (!isVisible || !overlayEl) return;
-            var visible = isHudVisible();
-            if (!visible && !isAutoHidden && !isUserHidden) {
-                isAutoHidden = true;
-                overlayEl.style.display = 'none';
-                if (vtgBtn) vtgBtn.style.display = 'none';
-                if (pollTimer) clearTimeout(pollTimer);
-            } else if (visible && isAutoHidden) {
-                isAutoHidden = false;
-                isUserHidden = false;
-                overlayEl.style.display = '';
-                if (vtgBtn) vtgBtn.style.display = '';
-                schedulePoll();
-            }
-        });
-        hudObserver.observe(hud, { attributes: true, attributeFilter: ['style', 'class'] });
-    }
+
     function createOverlay() {
         isUserHidden = false;
         if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; schedulePoll(); return; }
@@ -190,12 +162,13 @@
         overlayEl.id = 'oe2-vital-overlay';
         overlayEl.style.cssText = [
             'position:fixed',
-            'z-index:199',
+            'z-index:280',
             'bottom:20px',
             'right:16px',
+            'background:rgba(6,12,22,0.3)',
             'padding:4px 0',
             'font-family:Rajdhani,"Segoe UI",sans-serif',
-            'color:#c8d6e5',
+            'color:#e0e8f0',
             'font-size:15px',
             'width:260px',
             'pointer-events:auto',
@@ -207,17 +180,18 @@
         if (saved) { try { var p = JSON.parse(saved); overlayEl.style.left = p.x + 'px'; overlayEl.style.bottom = p.y + 'px'; overlayEl.style.right = ''; } catch (e) {} }
         overlayEl.innerHTML =
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
-            '<span style="font-size:11px;font-weight:700;color:#7ecfff;letter-spacing:.5px;">\u25C6 VITAL <span class="vln" style="color:#c8d6e5;letter-spacing:0;"></span></span>' +
+            '<span style="font-size:11px;font-weight:700;color:#7ecfff;letter-spacing:.5px;">\u25C6 VITAL <span class="vln" style="color:#e0e8f0;letter-spacing:0;"></span></span>' +
             '</div>' +
             '<div class="vb"></div>';
-        document.body.appendChild(overlayEl);
-        // Toggle button as separate body element to stay above stacking contexts
+        var hud = document.querySelector('#ui-component') || document.body;
+        hud.appendChild(overlayEl);
+        // Toggle button
         vtgBtn = document.createElement('span');
         vtgBtn.className = 'vtg';
         vtgBtn.textContent = '\u2295';
         vtgBtn.title = 'Show all';
         vtgBtn.style.cssText = 'position:fixed;z-index:9999;color:#546e7a;cursor:pointer;font-size:14px;padding:2px;user-select:none;';
-        document.body.appendChild(vtgBtn);
+        hud.appendChild(vtgBtn);
         positionVtg();
         vtgBtn.addEventListener('click', toggleExpand);
         isVisible = true;
@@ -228,7 +202,6 @@
             overlayEl.style.right = ''; overlayEl.style.left = r.left + 'px';
             overlayEl.style.bottom = (window.innerHeight - e.clientY + dragOffY - r.height) + 'px';
         });
-        setupHudObserver();
         injectStyles();
     }
 
@@ -243,7 +216,7 @@
         Object.assign(reopenBtn.style, {
             position:'fixed',zIndex:'999997',bottom:'16px',right:'16px',
             width:'32px',height:'32px',borderRadius:'50%',
-            background:'rgba(6,12,22,0.95)',border:'1px solid rgba(0,229,255,0.3)',
+            background:'rgba(6,12,22,0.35)',border:'1px solid rgba(0,229,255,0.3)',
             color:'#00e5ff',fontSize:'14px',cursor:'pointer',display:'flex',
             alignItems:'center',justifyContent:'center',
             boxShadow:'0 0 12px rgba(0,229,255,0.1)',transition:'all 0.2s',userSelect:'none'
@@ -276,7 +249,7 @@
             '.vr-enter-active{opacity:1;transform:translateY(0);max-height:30px}' +
             '.vr-leave{opacity:0;transform:translateY(16px);max-height:0;padding-top:0;padding-bottom:0;margin:0}' +
             '.vt{width:22px;font-size:10px;font-weight:700;text-align:center;flex-shrink:0}' +
-            '.vn{flex:1;font-size:13px;font-weight:600;color:#c8d6e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}' +
+            '.vn{flex:1;font-size:13px;font-weight:600;color:#e0e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}' +
             '.vp2{width:30px;text-align:right;font-size:11px;font-weight:700;flex-shrink:0}' +
             '.vd{display:inline-block;width:6px;height:6px;border-radius:50%;margin:1px}';
         document.head.appendChild(el);
@@ -294,9 +267,9 @@
         }
         var bg = '';
         if (pct !== null && mr !== null && mr > pct) {
-            bg = 'linear-gradient(to right,rgba(102,162,103,0.45) 0%,rgba(102,162,103,0.45) ' + pct + '%,rgba(234,237,137,0.45) ' + pct + '%,rgba(234,237,137,0.45) ' + mr + '%,rgba(166,69,68,0.45) ' + mr + '%,rgba(166,69,68,0.45) 100%)';
+            bg = 'linear-gradient(to right,rgba(102,162,103,0.5) 0%,rgba(102,162,103,0.5) ' + pct + '%,rgba(234,237,137,0.5) ' + pct + '%,rgba(234,237,137,0.5) ' + mr + '%,rgba(166,69,68,0.5) ' + mr + '%,rgba(166,69,68,0.5) 100%)';
         } else if (pct !== null) {
-            bg = 'linear-gradient(to right,rgba(102,162,103,0.45) 0%,rgba(102,162,103,0.45) ' + pct + '%,rgba(166,69,68,0.45) ' + pct + '%,rgba(166,69,68,0.45) 100%)';
+            bg = 'linear-gradient(to right,rgba(102,162,103,0.5) 0%,rgba(102,162,103,0.5) ' + pct + '%,rgba(166,69,68,0.5) ' + pct + '%,rgba(166,69,68,0.5) 100%)';
         }
         return '<div class="vr" style="background:' + bg + '">' +
             '<span class="vt" style="color:' + col + '">' + slotDef.label + '</span>' +
@@ -427,10 +400,14 @@
         if (b) b.innerHTML = '<div style="color:#888;font-size:12px;">' + msg + '</div>';
     }
 
+    function isInInstance() {
+        return !!document.querySelector('#ui-exit-instance');
+    }
     function schedulePoll() {
         if (pollTimer) clearTimeout(pollTimer);
         if (!isVisible || !overlayEl || overlayEl.style.display === 'none') return;
-        pollTimer = setTimeout(poll, 10000);
+        var interval = isInInstance() ? 2000 : 25000;
+        pollTimer = setTimeout(poll, interval);
     }
 
     function start() {

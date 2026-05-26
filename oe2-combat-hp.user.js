@@ -36,6 +36,7 @@
     let autoSyncEnabled = ENABLE_AUTO_SYNC;
     let _syncTimer = null;
     let _syncKillCount = 0;
+    let _lastLogKill = { shipType: '', hp: 0, time: 0 };
 
     // Migrate old intel format to v2
     migrateIntel();
@@ -519,7 +520,10 @@
         if (totalHP <= 0) return;
 
         var gearAvgEvo = updateGearFromParts(shipType, victim.parts);
-        updateIntelFromHP(shipType, totalHP, parsed.metadata, gearAvgEvo);
+        var logRecent = (Date.now() - _lastLogKill.time) < 30000 && _lastLogKill.shipType === shipType && Math.abs(_lastLogKill.hp - totalHP) / totalHP < 0.15;
+        if (!logRecent) {
+            updateIntelFromHP(shipType, totalHP, parsed.metadata, gearAvgEvo);
+        }
         saveIntel();
         _syncKillCount++;
     }
@@ -613,6 +617,16 @@
                 if (enriched.metadata) metadata = enriched.metadata;
             }
 
+            // If no ID on the name, find an existing sensor-tracked target with same baseClass
+            if (!id) {
+                for (const [k, v] of Object.entries(activeTargets)) {
+                    if (v.baseClass === baseClass && v.id) {
+                        activeTargets[name] = v;
+                        return v;
+                    }
+                }
+            }
+
             activeTargets[name] = {
                 damageTaken: 0,
                 lastSeen: Date.now(),
@@ -659,63 +673,62 @@
         if (entry.type === 'kill') {
             if (isHulk(entry.target)) { delete activeTargets[entry.target]; if (currentTarget === entry.target) currentTarget = null; return; }
             const target = activeTargets[entry.target];
-            // Only use combat-log accumulation if API is not available (fallback)
-            // When API is ready, exact HP comes from kill mail API via onKillDetected
+            // Always record HP from combat log as baseline
+            // API data (when available) supersedes via dedup in handleKillMailResponse
             if (target && target.damageTaken > 0 && target.damageTaken <= MAX_REASONABLE_DMG) {
                 const key = target.baseClass;
                 ensureBaseIntel(key);
                 const d = intel[key];
 
-                if (!apiReady()) {
-                    if (d.samples === 0) {
-                        d.avgHP = target.damageTaken;
-                        d.minHP = target.damageTaken;
-                        d.maxHP = target.damageTaken;
-                    } else {
-                        d.avgHP = d.avgHP * 0.85 + target.damageTaken * 0.15;
-                        d.minHP = Math.min(d.minHP, target.damageTaken);
-                        d.maxHP = Math.max(d.maxHP, target.damageTaken);
-                    }
-                    d.samples++;
+                if (d.samples === 0) {
+                    d.avgHP = target.damageTaken;
+                    d.minHP = target.damageTaken;
+                    d.maxHP = target.damageTaken;
+                } else {
+                    d.avgHP = d.avgHP * 0.85 + target.damageTaken * 0.15;
+                    d.minHP = Math.min(d.minHP, target.damageTaken);
+                    d.maxHP = Math.max(d.maxHP, target.damageTaken);
+                }
+                d.samples++;
 
-                    if (target.metadata) {
-                        const { rank, nickname } = parseMetadata(target.metadata);
-                        if (rank) {
-                            if (!d.ranks) d.ranks = {};
-                            if (!d.ranks[rank]) {
-                                d.ranks[rank] = { avgHP: 0, samples: 0, minHP: Infinity, maxHP: 0, nicknames: {}, gearTiers: {} };
+                if (target.metadata) {
+                    const { rank, nickname } = parseMetadata(target.metadata);
+                    if (rank) {
+                        if (!d.ranks) d.ranks = {};
+                        if (!d.ranks[rank]) {
+                            d.ranks[rank] = { avgHP: 0, samples: 0, minHP: Infinity, maxHP: 0, nicknames: {}, gearTiers: {} };
+                        }
+                        const r = d.ranks[rank];
+                        if (r.samples === 0) {
+                            r.avgHP = target.damageTaken;
+                            r.minHP = target.damageTaken;
+                            r.maxHP = target.damageTaken;
+                        } else {
+                            r.avgHP = r.avgHP * 0.85 + target.damageTaken * 0.15;
+                            r.minHP = Math.min(r.minHP, target.damageTaken);
+                            r.maxHP = Math.max(r.maxHP, target.damageTaken);
+                        }
+                        r.samples++;
+
+                        if (nickname) {
+                            if (!r.nicknames[nickname]) {
+                                r.nicknames[nickname] = { avgHP: 0, samples: 0, minHP: Infinity, maxHP: 0 };
                             }
-                            const r = d.ranks[rank];
-                            if (r.samples === 0) {
-                                r.avgHP = target.damageTaken;
-                                r.minHP = target.damageTaken;
-                                r.maxHP = target.damageTaken;
+                            const n = r.nicknames[nickname];
+                            if (n.samples === 0) {
+                                n.avgHP = target.damageTaken;
+                                n.minHP = target.damageTaken;
+                                n.maxHP = target.damageTaken;
                             } else {
-                                r.avgHP = r.avgHP * 0.85 + target.damageTaken * 0.15;
-                                r.minHP = Math.min(r.minHP, target.damageTaken);
-                                r.maxHP = Math.max(r.maxHP, target.damageTaken);
+                                n.avgHP = n.avgHP * 0.85 + target.damageTaken * 0.15;
+                                n.minHP = Math.min(n.minHP, target.damageTaken);
+                                n.maxHP = Math.max(n.maxHP, target.damageTaken);
                             }
-                            r.samples++;
-
-                            if (nickname) {
-                                if (!r.nicknames[nickname]) {
-                                    r.nicknames[nickname] = { avgHP: 0, samples: 0, minHP: Infinity, maxHP: 0 };
-                                }
-                                const n = r.nicknames[nickname];
-                                if (n.samples === 0) {
-                                    n.avgHP = target.damageTaken;
-                                    n.minHP = target.damageTaken;
-                                    n.maxHP = target.damageTaken;
-                                } else {
-                                    n.avgHP = n.avgHP * 0.85 + target.damageTaken * 0.15;
-                                    n.minHP = Math.min(n.minHP, target.damageTaken);
-                                    n.maxHP = Math.max(n.maxHP, target.damageTaken);
-                                }
-                                n.samples++;
-                            }
+                            n.samples++;
                         }
                     }
                 }
+                _lastLogKill = { shipType: key, hp: target.damageTaken, time: Date.now() };
 
                 d.missileLaunches += target.missileLaunches;
                 d.torpedoLaunches += target.torpedoLaunches;
@@ -918,7 +931,7 @@
 
             let estimatedHP, damageTaken;
             if (target) {
-                estimatedHP = hpInfo ? Math.max(hpInfo.avgHP, target.damageTaken) : target.damageTaken || 1;
+                estimatedHP = (hpInfo && hpInfo.avgHP > 0) ? hpInfo.avgHP : (target.damageTaken || 1);
                 damageTaken = target.damageTaken || 0;
             } else {
                 estimatedHP = hpInfo.avgHP;
