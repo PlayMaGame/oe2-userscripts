@@ -10,12 +10,13 @@ Features:
 - Smart pseudo-minimize handling
 - Sends game behind windows instead of offscreen
 - Maintains live rendering after minimize
+- System tray icon (Show/Hide, Quit)
 
 Requirements:
-    pip install pillow pywin32 psutil
+    pip install pillow pywin32 psutil pystray
 
 Run:
-    python oe_pip.py
+    pythonw oe_pip.pyw
 """
 
 import tkinter as tk
@@ -28,6 +29,9 @@ import win32ui
 
 import ctypes
 import psutil
+
+import pystray
+import threading
 
 
 TARGET_EXE   = "min.exe"
@@ -275,7 +279,9 @@ class PiP:
         self._round_mask: Image.Image | None = None
         self._mask_size: tuple[int, int] | None = None
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+
+        self._setup_tray()
 
         self.root.after(300, self.loop)
 
@@ -411,8 +417,48 @@ class PiP:
 
         self.root.after(REFRESH_MS, self.loop)
 
+    def _make_tray_image(self) -> Image.Image:
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.rounded_rectangle((2, 2, 61, 61), radius=10, fill=(20, 30, 60, 255))
+        draw.text((32, 24), "OE", fill=(200, 180, 80, 255), anchor="mm", font=None)
+        draw.text((32, 40), "2", fill=(255, 255, 255, 180), anchor="mm", font=None)
+        draw.rounded_rectangle((2, 2, 61, 61), radius=10, outline=(100, 140, 200, 200), width=2)
+        return img
+
+    def _setup_tray(self):
+        menu = pystray.Menu(
+            pystray.MenuItem("Show/Hide PiP", self._tray_toggle, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit", self._tray_quit),
+        )
+        self.tray_icon = pystray.Icon(
+            "oe_pip",
+            self._make_tray_image(),
+            "Outer Empires 2 — PiP",
+            menu
+        )
+        self._tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self._tray_thread.start()
+
+    def _tray_toggle(self, icon=None, item=None):
+        if self.root.state() == "withdrawn" or self.root.state() == "iconic":
+            self.root.deiconify()
+            self.root.lift()
+        else:
+            self.root.withdraw()
+
+    def _tray_quit(self, icon=None, item=None):
+        self.running = False
+        self.tray_icon.stop()
+        self.root.destroy()
+
+    def _hide_to_tray(self):
+        self.root.withdraw()
+
     def _on_close(self) -> None:
         self.running = False
+        self.tray_icon.stop()
         self.root.destroy()
 
     def _get_round_mask(self, w: int, h: int) -> Image.Image:

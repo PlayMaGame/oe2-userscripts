@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Force Tactical Filters ON
 // @namespace    http://tampermonkey.net/
-// @version      2.10
+// @version      2.11
 // @description  Keeps specific Tactical filters always enabled
 // @match        https://game.dev.outerempires.net/*
 // @grant        none
@@ -30,25 +30,51 @@
 
     let isTacticalView = false;
 
+    let savedZoom = null;
+
+    const EXIT_ZOOM = 5.75;
+
     window.addEventListener('viewChanged', (e) => {
         isTacticalView = e.detail === 'tactical';
     });
 
     // --------------------------------------------------
-    // Zoom to tactical view directly via PIXI viewport
+    // Zoom helpers via PIXI viewport
     // --------------------------------------------------
+    function getViewport() {
+        const app = window.space_view_pixi_app;
+        if (!app || !app.stage) return null;
+        return app.stage.children.find(c => c.constructor.name === 'ScaleBar')?.viewport;
+    }
+
+    function getCurrentZoom() {
+        const vp = getViewport();
+        if (!vp || typeof vp.getZoom !== 'function') return null;
+        return vp.getZoom();
+    }
+
+    function setZoom(value) {
+        const vp = getViewport();
+        if (!vp || typeof vp.setZoom !== 'function') return false;
+        vp.setZoom(value);
+        return true;
+    }
+
     function zoomToTacticalView() {
         try {
-            const app = window.space_view_pixi_app;
-            if (!app || !app.stage) return false;
-
-            const vp = app.stage.children.find(c => c.constructor.name === 'ScaleBar')?.viewport;
-            if (!vp || typeof vp.setZoom !== 'function') return false;
-
-            vp.setZoom(0.25);
+            if (!setZoom(0.2)) return false;
             return true;
         } catch (e) {
             return false;
+        }
+    }
+
+    function restoreZoom() {
+        if (savedZoom !== null) {
+            setZoom(savedZoom);
+            savedZoom = null;
+        } else {
+            setZoom(EXIT_ZOOM);
         }
     }
 
@@ -157,27 +183,6 @@
     }
 
     // --------------------------------------------------
-    // Toggle a single filter ON/OFF
-    // --------------------------------------------------
-    function setFilterState(filterName, stateOn) {
-        const labels = document.querySelectorAll('.TacticalFilters_ItemLabel');
-
-        labels.forEach(label => {
-            if (label.textContent.trim() !== filterName) return;
-
-            const toggle = findRowToggle(label);
-            if (!toggle) return;
-
-            const currentlyOn = isToggleOn(toggle);
-            if (stateOn && !currentlyOn) {
-                toggle.click();
-            } else if (!stateOn && currentlyOn) {
-                toggle.click();
-            }
-        });
-    }
-
-    // --------------------------------------------------
     // Click "Reset All"
     // --------------------------------------------------
     function clickResetAll() {
@@ -201,17 +206,18 @@
 
         // JUST ENTERED INSTANCE
         if (!wasInInstance && inInstance) {
+            savedZoom = getCurrentZoom();
+            console.log('[ForceFilters] Saved zoom:', savedZoom);
             turnOffBodyLabels();
             waitForTacticalUIThenSwitch();
         }
 
         // JUST LEFT INSTANCE
         if (wasInInstance && !inInstance) {
+            setTimeout(() => restoreZoom(), 300);
+
             if (!enabled) {
-                setTimeout(() => {
-                    clickResetAll();
-                    setTimeout(() => setFilterState('Jump Lanes', false), 200);
-                }, 300);
+                setTimeout(() => clickResetAll(), 300);
             }
         }
 

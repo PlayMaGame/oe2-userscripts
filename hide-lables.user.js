@@ -2,7 +2,7 @@
 // @name         Force Space Labels OFF
 // @namespace    http://tampermonkey.net/
 // @version      6.0
-// @description  Cycle Ship/Body/Jump labels with F2
+// @description  Cycle Ship/Body labels with F2
 // @match        https://game.dev.outerempires.net/*
 // @grant        none
 // ==/UserScript==
@@ -12,8 +12,7 @@
 
     const TARGET_LABELS = [
         'Ship Labels',
-        'Body Labels',
-        'Jump Lane Labels'
+        'Body Labels'
     ];
 
     const TOGGLE_SELECTOR =
@@ -27,25 +26,18 @@
         0:
         Ship OFF
         Body OFF
-        Jump OFF
 
         1:
         Ship ON
         Body OFF
-        Jump OFF
 
         2:
         Ship ON
         Body ON
-        Jump ON
+
     */
 
-    let mode = parseInt(
-        localStorage.getItem(STORAGE_KEY) || '0',
-        10
-    );
-
-    let isProcessing = false;
+    let mode = 0;
 
     function logMode() {
 
@@ -102,7 +94,6 @@
             const toggles =
                 node.querySelectorAll(TOGGLE_SELECTOR);
 
-            // just grab first valid toggle
             if (toggles.length > 0) {
                 return toggles[0];
             }
@@ -124,61 +115,40 @@
 
     function applyLabels() {
 
-        if (isProcessing) return;
+        const labels = getLabelNodes();
 
-        isProcessing = true;
+        labels.forEach(label => {
 
-        try {
+            const text =
+                label.textContent?.trim();
 
-            const labels = getLabelNodes();
+            if (!text) return;
 
-            labels.forEach(label => {
+            const toggle =
+                findRowToggle(label);
 
-                const text =
-                    label.textContent?.trim();
+            if (!toggle) return;
 
-                if (!text) return;
+            const current =
+                isToggleEnabled(toggle);
 
-                const toggle =
-                    findRowToggle(label);
+            const target =
+                shouldBeVisible(text);
 
-                // silent fail
-                if (!toggle) return;
+            if (current !== target) {
 
-                const current =
-                    isToggleEnabled(toggle);
+                console.log(
+                    `[Labels] ${target ? 'ON' : 'OFF'}: ${text}`
+                );
 
-                const target =
-                    shouldBeVisible(text);
-
-                if (current !== target) {
-
-                    console.log(
-                        `[Labels] ${target ? 'ON' : 'OFF'}: ${text}`
-                    );
-
-                    toggle.click();
-                }
-            });
-
-        } catch (err) {
-
-            console.error(
-                '[Labels] Error:',
-                err
-            );
-
-        } finally {
-
-            isProcessing = false;
-        }
+                toggle.click();
+            }
+        });
     }
 
     function applyWithRetries() {
 
         applyLabels();
-
-        // UI may rerender after click
         setTimeout(applyLabels, 300);
         setTimeout(applyLabels, 1000);
     }
@@ -199,7 +169,6 @@
         );
 
         logMode();
-
         applyWithRetries();
 
     }, true);
@@ -208,6 +177,11 @@
     window.addEventListener('load', () => {
 
         setTimeout(() => {
+
+            mode = parseInt(
+                localStorage.getItem(STORAGE_KEY) || '0',
+                10
+            );
 
             logMode();
             applyWithRetries();
