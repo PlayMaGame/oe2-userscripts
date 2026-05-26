@@ -67,7 +67,7 @@
 
             const start = ctx.currentTime + (i * 0.3);
 
-            gain.gain.setValueAtTime(0.07, start);
+            gain.gain.setValueAtTime(0.035, start);
 
             osc.start(start);
             osc.stop(start + 0.15);

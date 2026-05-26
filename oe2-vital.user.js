@@ -28,6 +28,9 @@
     var isExpanded = false;
     var isVisible = false;
     var lastShipData = null;
+    var isAutoHidden = false;
+    var isUserHidden = false;
+    var hudObserver = null;
     // Intercept game's own API traffic to capture base URL + auth token + character ID
     (function () {
         var origFetch = window.fetch;
@@ -152,27 +155,53 @@
         vtgBtn.style.right = (window.innerWidth - r.right - 20) + 'px';
         vtgBtn.style.bottom = (window.innerHeight - r.bottom - 2) + 'px';
     }
+    function isHudVisible() {
+        var el = document.querySelector('#ui-component');
+        if (!el) return true;
+        var style = getComputedStyle(el);
+        return el.offsetParent !== null && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+    function setupHudObserver() {
+        var hud = document.querySelector('#ui-component');
+        if (!hud || hudObserver) return;
+        hudObserver = new MutationObserver(function () {
+            if (!isVisible || !overlayEl) return;
+            var visible = isHudVisible();
+            if (!visible && !isAutoHidden && !isUserHidden) {
+                isAutoHidden = true;
+                overlayEl.style.display = 'none';
+                if (vtgBtn) vtgBtn.style.display = 'none';
+                if (pollTimer) clearTimeout(pollTimer);
+            } else if (visible && isAutoHidden) {
+                isAutoHidden = false;
+                isUserHidden = false;
+                overlayEl.style.display = '';
+                if (vtgBtn) vtgBtn.style.display = '';
+                schedulePoll();
+            }
+        });
+        hudObserver.observe(hud, { attributes: true, attributeFilter: ['style', 'class'] });
+    }
     function createOverlay() {
+        isUserHidden = false;
         if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; schedulePoll(); return; }
         if (reopenBtn) reopenBtn.style.display = 'none';
         overlayEl = document.createElement('div');
         overlayEl.id = 'oe2-vital-overlay';
         overlayEl.style.cssText = [
             'position:fixed',
-            'z-index:200',
+            'z-index:199',
             'bottom:20px',
             'right:16px',
             'padding:4px 0',
             'font-family:Rajdhani,"Segoe UI",sans-serif',
             'color:#c8d6e5',
             'font-size:15px',
-            'min-width:220px',
-            'max-width:260px',
+            'width:260px',
             'pointer-events:auto',
             'cursor:move',
             'user-select:none',
             'text-shadow:0 0 8px #000,0 1px 4px #000',
-            'filter:drop-shadow(0 2px 6px rgba(0,0,0,0.7))',
         ].join(';') + ';';
         var saved = localStorage.getItem(POS_KEY);
         if (saved) { try { var p = JSON.parse(saved); overlayEl.style.left = p.x + 'px'; overlayEl.style.bottom = p.y + 'px'; overlayEl.style.right = ''; } catch (e) {} }
@@ -199,10 +228,11 @@
             overlayEl.style.right = ''; overlayEl.style.left = r.left + 'px';
             overlayEl.style.bottom = (window.innerHeight - e.clientY + dragOffY - r.height) + 'px';
         });
+        setupHudObserver();
         injectStyles();
     }
 
-    function hideOverlay() { if (!overlayEl) return; overlayEl.style.display = 'none'; if (vtgBtn) vtgBtn.style.display = 'none'; isVisible = false; if (pollTimer) clearTimeout(pollTimer); createReopenBtn(); }
+    function hideOverlay(auto) { if (!overlayEl) return; overlayEl.style.display = 'none'; if (vtgBtn) vtgBtn.style.display = 'none'; isVisible = false; if (pollTimer) clearTimeout(pollTimer); if (!auto) createReopenBtn(); }
 
     function createReopenBtn() {
         if (reopenBtn) { reopenBtn.style.display = ''; return; }
@@ -240,7 +270,7 @@
         el.textContent = "@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');" +
             '.vtg:hover{color:#4dd0e1!important}' +
             '.vlist{overflow:hidden}' +
-            '.vr{display:flex;align-items:center;gap:4px;padding:2px 0;transition:all 0.3s ease;overflow:hidden}' +
+            '.vr{display:flex;align-items:center;gap:4px;padding:2px 0;transition:all 0.3s ease;overflow:hidden;min-width:0}' +
             '#oe2-vital-overlay .vr:hover{background:rgba(255,255,255,0.02)}' +
             '.vr-enter{opacity:0;transform:translateY(16px);max-height:0;padding-top:0;padding-bottom:0}' +
             '.vr-enter-active{opacity:1;transform:translateY(0);max-height:30px}' +
@@ -298,6 +328,21 @@
                 var def = SLOTS[key] || SLOTS.Core;
                 wanted.push({ comp: c, pct: pct, slotDef: def, idx: i });
             }
+        }
+        if (!isExpanded && wanted.length === 0) {
+            var fallback = [];
+            for (var i = 0; i < comps.length; i++) {
+                var c = comps[i];
+                var hp = c.healthPercentage;
+                var pct = hp !== null && hp !== undefined ? Math.round(hp) : null;
+                if (pct !== null && pct < 85) {
+                    var key = getSlot(c.name, c.blueprintType);
+                    var def = SLOTS[key] || SLOTS.Core;
+                    fallback.push({ comp: c, pct: pct, slotDef: def, idx: i });
+                }
+            }
+            fallback.sort(function (a, b) { return (a.pct !== null ? a.pct : 999) - (b.pct !== null ? b.pct : 999); });
+            wanted = fallback.slice(0, 3);
         }
         wanted.sort(function (a, b) {
             var ha = a.pct !== null ? a.pct : 999;
@@ -400,7 +445,7 @@
         positionVtg();
     });
     document.addEventListener('mouseup', function () { if (isDragging && overlayEl) { isDragging = false; overlayEl.style.cursor = ''; positionVtg(); var r = overlayEl.getBoundingClientRect(); localStorage.setItem(POS_KEY, JSON.stringify({ x: r.left, y: window.innerHeight - r.bottom })); } });
-    document.addEventListener('keydown', function (e) { if (e.altKey && e.key === 'v') { e.preventDefault(); if (isVisible && overlayEl && overlayEl.style.display !== 'none') hideOverlay(); else createOverlay(); } });
+    document.addEventListener('keydown', function (e) { if (e.altKey && e.key === 'v') { e.preventDefault(); if (isVisible && overlayEl && overlayEl.style.display !== 'none') { isUserHidden = true; hideOverlay(); } else { isUserHidden = false; createOverlay(); } } });
 
     var started = false;
     function tryStart() { if (started) return; started = true; setTimeout(start, 2000); }

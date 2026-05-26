@@ -1,11 +1,11 @@
 """
-Outer Empires – PiP overlay  (v8)
+Outer Empires – PiP overlay  (v9)
 =================================
 Features:
 - Drag to move
 - Double-click to jump to game
 - 10 FPS
-- Rounded corners
+- 4x zoom (center crop)
 - PrintWindow(PW_RENDERFULLCONTENT) capture
 - Smart pseudo-minimize handling
 - Sends game behind windows instead of offscreen
@@ -43,13 +43,26 @@ PIP_H        = 180
 # 10 FPS
 REFRESH_MS   = 100
 
-OPACITY      = 0.93
-CORNER_R     = 14
+OPACITY      = 0.99   # 0.0 (invisible) – 1.0 (opaque)
+
+# crop center portion then upscale → 4x zoom
+ZOOM_CROP_RATIO = 0.25
 
 # offset from screen bottom (taskbar area)
 PIP_Y_OFFSET = 70
 
 PW_RENDERFULLCONTENT = 0x00000002
+
+
+def min_process_exists() -> bool:
+    """Return True if at least one min.exe process is running."""
+    for p in psutil.process_iter(["name"]):
+        try:
+            if p.info["name"] and p.info["name"].lower() == TARGET_EXE.lower():
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def find_window() -> int | None:
@@ -139,22 +152,6 @@ def capture_window(hwnd) -> Image.Image | None:
             mdc.DeleteDC()
         if hdc:
             win32gui.ReleaseDC(hwnd, hdc)
-
-
-def apply_round_mask(img: Image.Image, radius: int) -> Image.Image:
-    img = img.convert("RGBA")
-
-    mask = Image.new("L", img.size, 0)
-
-    ImageDraw.Draw(mask).rounded_rectangle(
-        [(0, 0), img.size],
-        radius=radius,
-        fill=255
-    )
-
-    img.putalpha(mask)
-
-    return img
 
 
 def is_minimized(hwnd: int) -> bool:
@@ -269,15 +266,12 @@ class PiP:
         # tracks true minimize events
         self.was_minimized = False
 
-        self.img_ref = None
+        self._photo_ref = None
 
         self.running = True
 
         self._dx = 0
         self._dy = 0
-
-        self._round_mask: Image.Image | None = None
-        self._mask_size: tuple[int, int] | None = None
 
         self.root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
 
@@ -335,12 +329,16 @@ class PiP:
                 self.parked = False
                 self.was_minimized = False
 
-            # Waiting state
+            # Waiting / shutdown
             if self.hwnd is None:
+
+                if not min_process_exists():
+                    self._tray_quit()
+                    return
 
                 self._placeholder("Waiting for game window…")
 
-                self.root.after(2000, self.loop)
+                self.root.after(REFRESH_MS, self.loop)
 
                 return
 
@@ -393,23 +391,26 @@ class PiP:
             cw = self.canvas.winfo_width() or PIP_W
             ch = self.canvas.winfo_height() or PIP_H
 
-            img = img.resize((cw, ch), Image.LANCZOS)
+            # center crop for 4x zoom
+            iw, ih = img.size
+            crop_w = int(iw * ZOOM_CROP_RATIO)
+            crop_h = int(ih * ZOOM_CROP_RATIO)
+            left = (iw - crop_w) // 2
+            top = (ih - crop_h) // 2
+            img = img.crop((left, top, left + crop_w, top + crop_h))
 
-            img.putalpha(self._get_round_mask(cw, ch))
+            img = img.resize((cw, ch), Image.LANCZOS)
 
             photo = ImageTk.PhotoImage(img)
 
-            self.canvas.delete("frame")
+            if not self.canvas.find_withtag("frame"):
+                self.canvas.create_image(
+                    0, 0, anchor="nw", image=photo, tags="frame"
+                )
+            else:
+                self.canvas.itemconfig("frame", image=photo)
 
-            self.canvas.create_image(
-                0,
-                0,
-                anchor="nw",
-                image=photo,
-                tags="frame"
-            )
-
-            self.img_ref = photo
+            self._photo_ref = photo
 
         except Exception as ex:
 
@@ -460,16 +461,6 @@ class PiP:
         self.running = False
         self.tray_icon.stop()
         self.root.destroy()
-
-    def _get_round_mask(self, w: int, h: int) -> Image.Image:
-        if (w, h) != self._mask_size:
-            mask = Image.new("L", (w, h), 0)
-            ImageDraw.Draw(mask).rounded_rectangle(
-                [(0, 0), (w, h)], radius=CORNER_R, fill=255
-            )
-            self._round_mask = mask
-            self._mask_size = (w, h)
-        return self._round_mask
 
     def _placeholder(self, msg: str) -> None:
 
