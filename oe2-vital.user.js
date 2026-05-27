@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         OE2 VITAL — Vessel Integrity Tracking & Assessment Layer
 // @namespace    https://game.dev.outerempires.net/
-// @version      2.1
-// @description  Real-time ship maintenance grade — A-F rating, component list, and details (30s REST polling + passive WS intercept)
+// @version      3.0
+// @description  Real-time ship maintenance grade — A-F rating, component list, and details (WebSocket-driven ShipPartsUpdate)
 // @match        https://game.dev.outerempires.net/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
@@ -19,7 +19,7 @@
     var API_CHAR_ID = localStorage.getItem('_oe2_api_char_id') || '';
     var _snapshotFetched = false;
 
-    console.log('[VITAL] v2.1 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
+    console.log('[VITAL] v3.0 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
 
     var overlayEl = null;
     var reopenBtn = null;
@@ -31,14 +31,13 @@
     var isUserHidden = false;
     var components = {};
     var shipName = '';
-    var _pollTimer = null;
 
     // Credential capture from game traffic + localStorage persistence (shared with other OE2 scripts)
     (function () {
         var origFetch = window.fetch;
         window.fetch = function (input, init) {
             var r = origFetch.apply(this, arguments);
-            r.then(function () {
+            r.then(function (resp) {
                 try {
                     var url = typeof input === 'string' ? input : input ? input.url : '';
                     if (!url || url.indexOf('twitch') !== -1) return;
@@ -54,6 +53,11 @@
                     }
                     if (changed) console.log('[VITAL] Credentials ready');
                     if (changed && !_snapshotFetched) fetchInitialSnapshot();
+                    // Detect repair API calls and refresh snapshot
+                    if (resp && resp.ok && url.indexOf('repair') !== -1) {
+                        console.log('[VITAL] Repair detected, refreshing snapshot');
+                        refreshSnapshot();
+                    }
                 } catch (e) {}
             });
             return r;
@@ -82,76 +86,112 @@
             }
             return _setH.apply(this, arguments);
         };
-    })();
-
-    // Passive WebSocket intercept — catches ShipPartUpdate if game ever sends it
-    (function () {
-        var _origDispatch = EventTarget.prototype.dispatchEvent;
-        EventTarget.prototype.dispatchEvent = function (event) {
-            if (this instanceof WebSocket && event && event.type === 'message') {
-                var data = event.data || (event instanceof MessageEvent ? event.data : null);
-                if (typeof data === 'string') {
-                    try {
-                        var p = JSON.parse(data);
-                        var msgs = Array.isArray(p) ? p : [p];
-                        for (var i = 0; i < msgs.length; i++) {
-                            var m = msgs[i];
-                            if (m.message_type === 'ShipPartUpdate' || m.type === 'ShipPartUpdate') {
-                                handlePartUpdate(m.data || m.Data || m.message || m);
-                            }
-                        }
-                    } catch (e) {}
-                }
+        var _send = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function () {
+            var xhr = this;
+            var u = xhr._vitalUrl || '';
+            if (u.indexOf('repair') !== -1 && (u.indexOf('oe2') !== -1 || u.indexOf('outerempires') !== -1)) {
+                xhr.addEventListener('load', function () {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        console.log('[VITAL] Repair detected (XHR), refreshing snapshot');
+                        refreshSnapshot();
+                    }
+                });
             }
-            return _origDispatch.apply(this, arguments);
+            return _send.apply(this, arguments);
         };
     })();
 
-    function handlePartUpdate(data) {
-        var id = data.componentId || data.ComponentId || data.id || data.Id;
-        if (id === undefined || id === null) return;
-        id = '' + id;
-        console.log('[VITAL] ShipPartUpdate:', id, (data.healthPercentage !== undefined ? data.healthPercentage + '%' : ''));
-        var oldHP = components[id] ? components[id].healthPercentage : undefined;
-        if (components[id]) {
-            for (var k in data) { if (data.hasOwnProperty(k)) components[id][k] = data[k]; }
-        } else {
-            components[id] = JSON.parse(JSON.stringify(data));
+    // WebSocket interceptor — catches GameUpdate/ShipPartsUpdate messages
+    (function () {
+        console.log('[VITAL] WS interceptor installing at document-start');
+        var _origAdd = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function (type, listener, options) {
+            if (type === 'message' && this instanceof WebSocket) {
+                var self = this;
+                var wrapped = function (e) {
+                    if (typeof e.data === 'string') tryProcess(e.data);
+                    if (typeof listener === 'function') return listener.apply(self, arguments);
+                    else if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(e);
+                };
+                return _origAdd.call(this, type, wrapped, options);
+            }
+            return _origAdd.apply(this, arguments);
+        };
+        if (window.WebSocket) {
+            var _origWS = window.WebSocket;
+            window.WebSocket = function (url, protocols) {
+                var ws = new _origWS(url, protocols);
+                Object.defineProperty(ws, 'onmessage', {
+                    configurable: true, enumerable: true,
+                    get: function () { return this.__vital_om; },
+                    set: function (fn) {
+                        this.__vital_om = fn;
+                        _origAdd.call(ws, 'message', function (e) {
+                            if (typeof e.data === 'string') tryProcess(e.data);
+                            if (this.__vital_om) this.__vital_om.call(this, e);
+                        });
+                    }
+                });
+                return ws;
+            };
+            window.WebSocket.prototype = _origWS.prototype;
+            window.WebSocket.CONNECTING = 0;
+            window.WebSocket.OPEN = 1;
+            window.WebSocket.CLOSING = 2;
+            window.WebSocket.CLOSED = 3;
         }
-        var newHP = components[id].healthPercentage;
-        if (oldHP !== undefined && newHP !== undefined && newHP < oldHP) {
-            components[id]._damageFlash = Date.now();
+        function tryProcess(text) {
+            try { var p = JSON.parse(text); } catch (e) { return; }
+            var msgs = Array.isArray(p) ? p : [p];
+            for (var i = 0; i < msgs.length; i++) {
+                var m = msgs[i];
+                if (m.message_type === 'GameUpdate' && m.message) {
+                    handleGameUpdate(m.message);
+                }
+            }
         }
-        renderFromState();
+    })();
+
+    function handleGameUpdate(msg) {
+        var action = msg.action;
+        var payload = msg.payload;
+        if (!action || !payload) return;
+        if (action === 'ShipPartsUpdate') {
+            applyPartUpdates(payload);
+        } else if (action === 'CombinedUpdate' && Array.isArray(payload)) {
+            for (var i = 0; i < payload.length; i++) {
+                if (payload[i].action === 'ShipPartsUpdate') {
+                    applyPartUpdates(payload[i].payload);
+                }
+            }
+        }
     }
 
-    function pollAvailableShips() {
-        if (!API_BASE || !API_AUTH) return;
-        fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
-            headers: { 'Authorization': API_AUTH }
-        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
-            if (!body || !body.success) return;
-            var ships = body.data;
-            if (!Array.isArray(ships) || !ships.length) return;
-            var ship = ships[0];
-            if (!ship.components) return;
-            var changed = false;
-            for (var j = 0; j < ship.components.length; j++) {
-                var c = ship.components[j];
-                var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : 'c_' + j;
-                if (components[id]) {
-                    var oldHP = components[id].healthPercentage;
-                    if (oldHP !== undefined && c.healthPercentage !== undefined && c.healthPercentage < oldHP) {
-                        components[id]._damageFlash = Date.now();
-                    }
-                    for (var k in c) { if (c.hasOwnProperty(k)) components[id][k] = c[k]; }
-                } else {
-                    components[id] = JSON.parse(JSON.stringify(c));
+    function applyPartUpdates(parts) {
+        if (!Array.isArray(parts) || !parts.length) return;
+        var changed = false;
+        for (var i = 0; i < parts.length; i++) {
+            var c = parts[i];
+            var id = c.id !== undefined && c.id !== null ? '' + c.id : c.Id !== undefined && c.Id !== null ? '' + c.Id : null;
+            if (!id) continue;
+            // Dedup: remove any synthetic 'c_' entry that matches this component name
+            var staleKeys = Object.keys(components).filter(function (k) { return k.indexOf('c_') === 0 && components[k].name === c.name; });
+            for (var si = 0; si < staleKeys.length; si++) { delete components[staleKeys[si]]; changed = true; }
+            if (!components[id]) {
+                components[id] = JSON.parse(JSON.stringify(c));
+                if (i === 0) console.log('[VITAL] New component via WS:', id, c.name, Object.keys(c).join(','));
+            } else {
+                var oldHP = components[id].healthPercentage;
+                for (var k in c) { if (c.hasOwnProperty(k)) components[id][k] = c[k]; }
+                var newHP = components[id].healthPercentage;
+                if (oldHP !== undefined && newHP !== undefined && newHP < oldHP) {
+                    components[id]._damageFlash = Date.now();
                 }
-                changed = true;
             }
-            if (changed) renderFromState();
-        }).catch(function () {});
+            changed = true;
+        }
+        if (changed) renderFromState();
     }
 
     function fetchInitialSnapshot() {
@@ -173,14 +213,43 @@
             if (ship.components) {
                 for (var j = 0; j < ship.components.length; j++) {
                     var c = ship.components[j];
-                    var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : 'c_' + j;
-                    components[id] = c;
+                    var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : c.id !== undefined && c.id !== null ? '' + c.id : null;
+                    if (id) { components[id] = c; } else { console.log('[VITAL] Component missing id:', c.name || '?'); }
                 }
             }
             renderFromState();
-            if (_pollTimer) clearInterval(_pollTimer);
-            _pollTimer = setInterval(pollAvailableShips, 30000);
         }).catch(function () { console.log('[VITAL] Snapshot fetch error'); });
+    }
+
+    function refreshSnapshot() {
+        if (!API_BASE || !API_AUTH || !API_CHAR_ID) { console.log('[VITAL] refreshSnapshot: no creds'); return; }
+        console.log('[VITAL] Refreshing snapshot...');
+        fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
+            headers: { 'Authorization': API_AUTH }
+        }).then(function (resp) {
+            if (!resp.ok) { console.log('[VITAL] Refresh failed:', resp.status); return null; }
+            return resp.json();
+        }).then(function (body) {
+            if (!body || !body.success) return;
+            var ships = body.data;
+            if (!Array.isArray(ships) || !ships.length) return;
+            var ship = ships[0];
+            shipName = ship.summary ? (ship.summary.shipName || ship.summary.shipType || '') : '';
+            if (ship.components) {
+                for (var j = 0; j < ship.components.length; j++) {
+                    var c = ship.components[j];
+                    var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : c.id !== undefined && c.id !== null ? '' + c.id : null;
+                    if (!id) continue;
+                    if (components[id]) {
+                        for (var k in c) { if (c.hasOwnProperty(k)) components[id][k] = c[k]; }
+                    } else {
+                        components[id] = JSON.parse(JSON.stringify(c));
+                    }
+                }
+            }
+            renderFromState();
+            console.log('[VITAL] Snapshot refreshed');
+        }).catch(function () { console.log('[VITAL] Refresh error'); });
     }
 
     function renderFromState() {
@@ -502,6 +571,7 @@
 
     function start() {
         createOverlay();
+        setInterval(refreshSnapshot, 60000);
     }
 
     document.addEventListener('mousemove', function (e) {

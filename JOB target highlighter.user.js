@@ -17,12 +17,24 @@
 
     const shipColors = {
         'Heavy Shuttle': '#ef4444',
-        'Interceptor': '#eab308',
+        'Interceptor': '#22c55e',
         'Fighter Bomber': '#f59e0b',
         'Scout': '#22c55e',
         'Sentry': '#ef4444',
         'Patrol': '#3b82f6',
     };
+
+    function getTargetColor(ship, count) {
+        if (ship === 'Sentry') {
+            const n = parseInt(count, 10);
+            return n >= 3 ? '#ef4444' : n === 2 ? '#eab308' : '#22c55e';
+        }
+        if (ship === 'Patrol') {
+            const n = parseInt(count, 10);
+            return n >= 4 ? '#ef4444' : n === 3 ? '#eab308' : '#3b82f6';
+        }
+        return shipColors[ship] || '#ffffff';
+    }
 
     // --------------------------------------------------
     // PREP
@@ -104,7 +116,7 @@
                     t => t.toLowerCase() === ship.toLowerCase()
                 ) || ship;
 
-            const color = shipColors[key] || '#ffffff';
+            const color = getTargetColor(key, count);
 
             // create highlight span
             const span = document.createElement('span');
