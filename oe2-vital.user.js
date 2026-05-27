@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OE2 VITAL — Vessel Integrity Tracking & Assessment Layer
 // @namespace    https://game.dev.outerempires.net/
-// @version      2.0
-// @description  Real-time ship maintenance grade — A-F rating, component list, and details (WebSocket-driven)
+// @version      2.1
+// @description  Real-time ship maintenance grade — A-F rating, component list, and details (30s REST polling + passive WS intercept)
 // @match        https://game.dev.outerempires.net/*
 // @grant        none
 // @run-at       document-idle
@@ -19,7 +19,7 @@
     var API_CHAR_ID = localStorage.getItem('_oe2_api_char_id') || '';
     var _snapshotFetched = false;
 
-    console.log('[VITAL] v2.0 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
+    console.log('[VITAL] v2.1 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
 
     var overlayEl = null;
     var reopenBtn = null;
@@ -31,8 +31,7 @@
     var isUserHidden = false;
     var components = {};
     var shipName = '';
-    var _lastSPU = 0;
-    var _fallbackTimer = null;
+    var _pollTimer = null;
 
     // Credential capture from game traffic + localStorage persistence (shared with other OE2 scripts)
     (function () {
@@ -85,87 +84,33 @@
         };
     })();
 
-    // WebSocket interceptor — captures ShipPartUpdate on any WebSocket
+    // Passive WebSocket intercept — catches ShipPartUpdate if game ever sends it
     (function () {
-        console.log('[VITAL] WebSocket interceptor installing...');
-        var _dbgStart = Date.now();
-        var _dbgCount = 0;
-        var _dbgMax = 50;
-        var _origETadd = EventTarget.prototype.addEventListener;
         var _origDispatch = EventTarget.prototype.dispatchEvent;
         EventTarget.prototype.dispatchEvent = function (event) {
             if (this instanceof WebSocket && event && event.type === 'message') {
-                _dbgSniff(event.data || (event instanceof MessageEvent ? event.data : null));
+                var data = event.data || (event instanceof MessageEvent ? event.data : null);
+                if (typeof data === 'string') {
+                    try {
+                        var p = JSON.parse(data);
+                        var msgs = Array.isArray(p) ? p : [p];
+                        for (var i = 0; i < msgs.length; i++) {
+                            var m = msgs[i];
+                            if (m.message_type === 'ShipPartUpdate' || m.type === 'ShipPartUpdate') {
+                                handlePartUpdate(m.data || m.Data || m.message || m);
+                            }
+                        }
+                    } catch (e) {}
+                }
             }
             return _origDispatch.apply(this, arguments);
         };
-        function _dbgSniff(data) {
-            if (_dbgCount >= _dbgMax) return;
-            _dbgCount++;
-            var text = typeof data === 'string' ? data : '';
-            if (!text) { console.log('[VITAL] WS non-text data type:', typeof data); return; }
-            try {
-                var p = JSON.parse(text);
-                var msgs = Array.isArray(p) ? p : [p];
-                for (var i = 0; i < msgs.length; i++) {
-                    var m = msgs[i];
-                    var t = m.type || m.Type || '(no type)';
-                    var snippet = JSON.stringify(m).slice(0, 200);
-                    console.log('[VITAL] WS msg[' + _dbgCount + '] type=' + t + ' data=' + snippet);
-                    if (t === 'ShipPartUpdate') {
-                        handlePartUpdate(m.data || m.Data || m);
-                    }
-                }
-            } catch (e) {
-                var snip = text.slice(0, 120);
-                console.log('[VITAL] WS non-JSON[' + _dbgCount + ']:', snip);
-            }
-        }
-        EventTarget.prototype.addEventListener = function (type, listener, options) {
-            if (type === 'message' && this instanceof WebSocket) {
-                var self = this;
-                var wrapped = function (e) {
-                    _dbgSniff(e.data);
-                    if (typeof listener === 'function') return listener.apply(self, arguments);
-                    else if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(e);
-                };
-                return _origETadd.call(this, type, wrapped, options);
-            }
-            return _origETadd.apply(this, arguments);
-        };
-        // Wrap WebSocket constructor to intercept per-instance (handles onmessage)
-        var _origWS = window.WebSocket;
-        window.WebSocket = function (url, protocols) {
-            console.log('[VITAL] WebSocket created:', (url || '').slice(0, 80));
-            if (!(this instanceof window.WebSocket)) return new window.WebSocket(url, protocols);
-            var ws = new _origWS(url, protocols);
-            Object.defineProperty(ws, 'onmessage', {
-                configurable: true, enumerable: true,
-                get: function () { return this.__vital_om; },
-                set: function (fn) {
-                    this.__vital_om = fn;
-                    var self = this;
-                    _origETadd.call(ws, 'message', function (e) {
-                        _dbgSniff(e.data);
-                        if (self.__vital_om) self.__vital_om.call(self, e);
-                    });
-                }
-            });
-            return ws;
-        };
-        window.WebSocket.prototype = _origWS.prototype;
-        window.WebSocket.CONNECTING = 0;
-        window.WebSocket.OPEN = 1;
-        window.WebSocket.CLOSING = 2;
-        window.WebSocket.CLOSED = 3;
-        console.log('[VITAL] WebSocket interceptor installed');
     })();
 
     function handlePartUpdate(data) {
         var id = data.componentId || data.ComponentId || data.id || data.Id;
         if (id === undefined || id === null) return;
         id = '' + id;
-        _lastSPU = Date.now();
         console.log('[VITAL] ShipPartUpdate:', id, (data.healthPercentage !== undefined ? data.healthPercentage + '%' : ''));
         var oldHP = components[id] ? components[id].healthPercentage : undefined;
         if (components[id]) {
@@ -180,32 +125,33 @@
         renderFromState();
     }
 
-    function startFallbackPoll() {
-        if (_fallbackTimer) return;
-        console.log('[VITAL] Fallback poll: waiting 20s for ShipPartUpdate...');
-        setTimeout(function () {
-            if (_lastSPU > 0) { console.log('[VITAL] Fallback: ShipPartUpdate seen, no polling needed'); return; }
-            console.log('[VITAL] Fallback: no ShipPartUpdate in 20s, starting 60s poll');
-            _fallbackTimer = setInterval(function () {
-                console.log('[VITAL] Fallback polling availableShips...');
-                fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
-                    headers: { 'Authorization': API_AUTH }
-                }).then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
-                    if (!body || !body.success) return;
-                    var ships = body.data;
-                    if (!Array.isArray(ships) || !ships.length) return;
-                    var ship = ships[0];
-                    if (!ship.components) return;
-                    for (var j = 0; j < ship.components.length; j++) {
-                        var c = ship.components[j];
-                        var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : 'c_' + j;
-                        components[id] = components[id] || {};
-                        for (var k in c) { if (c.hasOwnProperty(k)) components[id][k] = c[k]; }
+    function pollAvailableShips() {
+        if (!API_BASE || !API_AUTH) return;
+        fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
+            headers: { 'Authorization': API_AUTH }
+        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
+            if (!body || !body.success) return;
+            var ships = body.data;
+            if (!Array.isArray(ships) || !ships.length) return;
+            var ship = ships[0];
+            if (!ship.components) return;
+            var changed = false;
+            for (var j = 0; j < ship.components.length; j++) {
+                var c = ship.components[j];
+                var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : 'c_' + j;
+                if (components[id]) {
+                    var oldHP = components[id].healthPercentage;
+                    if (oldHP !== undefined && c.healthPercentage !== undefined && c.healthPercentage < oldHP) {
+                        components[id]._damageFlash = Date.now();
                     }
-                    renderFromState();
-                }).catch(function () {});
-            }, 60000);
-        }, 20000);
+                    for (var k in c) { if (c.hasOwnProperty(k)) components[id][k] = c[k]; }
+                } else {
+                    components[id] = JSON.parse(JSON.stringify(c));
+                }
+                changed = true;
+            }
+            if (changed) renderFromState();
+        }).catch(function () {});
     }
 
     function fetchInitialSnapshot() {
@@ -232,7 +178,8 @@
                 }
             }
             renderFromState();
-            startFallbackPoll();
+            if (_pollTimer) clearInterval(_pollTimer);
+            _pollTimer = setInterval(pollAvailableShips, 30000);
         }).catch(function () { console.log('[VITAL] Snapshot fetch error'); });
     }
 
