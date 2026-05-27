@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OE2 VITAL — Vessel Integrity Tracking & Assessment Layer
 // @namespace    https://game.dev.outerempires.net/
-// @version      1.7
-// @description  Real-time ship maintenance grade — A-F rating, component dot grid, and details
+// @version      2.0
+// @description  Real-time ship maintenance grade — A-F rating, component list, and details (WebSocket-driven)
 // @match        https://game.dev.outerempires.net/*
 // @grant        none
 // @run-at       document-idle
@@ -17,19 +17,19 @@
     var API_BASE = '';
     var API_AUTH = '';
     var API_CHAR_ID = '';
-    var API_SHIP_ID = '';
 
     var overlayEl = null;
     var reopenBtn = null;
     var vtgBtn = null;
-    var pollTimer = null;
     var isDragging = false;
     var dragOffX = 0, dragOffY = 0;
     var isExpanded = false;
     var isVisible = false;
-    var lastShipData = null;
     var isUserHidden = false;
-    // Intercept game's own API traffic to capture base URL + auth token + character ID
+    var components = {};
+    var shipName = '';
+
+    // Minimal credential capture (just for initial snapshot)
     (function () {
         var origFetch = window.fetch;
         window.fetch = function (input, init) {
@@ -42,8 +42,6 @@
                     if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) API_BASE = m[1]; }
                     var cm = url.match(/characterId=(\d+)/);
                     if (cm) API_CHAR_ID = cm[1];
-                    var sm = url.match(/\/v1\/ship\/(\d+)\//);
-                    if (sm) API_SHIP_ID = sm[1];
                     var headers = init ? init.headers : (input ? input.headers : {});
                     if (typeof headers === 'object' && !Array.isArray(headers)) {
                         var auth = headers.Authorization || headers.authorization || '';
@@ -54,61 +52,88 @@
             return r;
         };
     })();
+
+    // WebSocket interceptor — capture ShipPartUpdate messages
     (function () {
-        var _open = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function (method, url) {
-            this._vitalUrl = url;
-            return _open.apply(this, arguments);
+        var OrigWS = window.WebSocket;
+        window.WebSocket = function (url, protocols) {
+            var ws = new OrigWS(url, protocols);
+            ws.addEventListener('message', function (e) {
+                try {
+                    var parsed = JSON.parse(e.data);
+                    var msgs = Array.isArray(parsed) ? parsed : [parsed];
+                    for (var i = 0; i < msgs.length; i++) {
+                        var m = msgs[i];
+                        if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
+                            handlePartUpdate(m.data || m.Data || m);
+                        }
+                    }
+                } catch (err) {}
+            });
+            return ws;
         };
-        var _setH = XMLHttpRequest.prototype.setRequestHeader;
-        XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
-            var u = this._vitalUrl || '';
-            if (u.indexOf('twitch') === -1 && (u.indexOf('oe2') !== -1 || u.indexOf('outerempires') !== -1)) {
-                if (!API_BASE) { var m = u.match(/^(https:\/\/[^/]+)/); if (m) API_BASE = m[1]; }
-                if (k.toLowerCase() === 'authorization' && !API_AUTH) API_AUTH = v;
-                var cm = u.match(/characterId=(\d+)/);
-                if (cm) API_CHAR_ID = cm[1];
-                var sm = u.match(/\/v1\/ship\/(\d+)\//);
-                if (sm) API_SHIP_ID = sm[1];
-            }
-            return _setH.apply(this, arguments);
-        };
+        window.WebSocket.prototype = OrigWS.prototype;
+        window.WebSocket.CONNECTING = 0;
+        window.WebSocket.OPEN = 1;
+        window.WebSocket.CLOSING = 2;
+        window.WebSocket.CLOSED = 3;
     })();
 
-    function fetchShipConfig() {
-        if (!API_BASE || !API_AUTH) return Promise.resolve(null);
-        return fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
+    function handlePartUpdate(data) {
+        var id = data.componentId || data.ComponentId || data.id || data.Id;
+        if (id === undefined || id === null) return;
+        id = '' + id;
+        if (components[id]) {
+            for (var k in data) { if (data.hasOwnProperty(k)) components[id][k] = data[k]; }
+        } else {
+            components[id] = JSON.parse(JSON.stringify(data));
+        }
+        renderFromState();
+    }
+
+    function fetchInitialSnapshot() {
+        if (!API_BASE || !API_AUTH) { statusMsg('\u2014 awaiting API \u2014'); return; }
+        fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
             headers: { 'Authorization': API_AUTH }
         }).then(function (resp) {
             if (!resp.ok) return null;
-            return resp.json().then(function (body) {
-                if (!body || !body.success) return null;
-                var ships = body.data;
-                if (!Array.isArray(ships) || ships.length === 0) return null;
-                // Pick the first ship (or the one matching our captured ship ID)
-                var ship = ships[0];
-                if (API_SHIP_ID) {
-                    for (var i = 0; i < ships.length; i++) {
-                        if (ships[i].id == API_SHIP_ID) { ship = ships[i]; break; }
-                    }
+            return resp.json();
+        }).then(function (body) {
+            if (!body || !body.success) return;
+            var ships = body.data;
+            if (!Array.isArray(ships) || !ships.length) return;
+            var ship = ships[0];
+            shipName = ship.summary ? (ship.summary.shipName || ship.summary.shipType || '') : '';
+            if (ship.components) {
+                for (var j = 0; j < ship.components.length; j++) {
+                    var c = ship.components[j];
+                    var id = c.Id !== undefined && c.Id !== null ? '' + c.Id : 'c_' + j;
+                    components[id] = c;
                 }
-                // Compute overallIntegrity and isDamaged from components if missing
-                if (ship && ship.components && ship.components.length > 0) {
-                    if (!ship.summary) ship.summary = {};
-                    var total = 0, count = 0, damaged = false;
-                    for (var i = 0; i < ship.components.length; i++) {
-                        var hp = ship.components[i].healthPercentage;
-                        if (hp !== null && hp !== undefined) { total += hp; count++; }
-                        if (hp !== null && hp !== undefined && hp < 90) damaged = true;
-                    }
-                    ship.summary.overallIntegrity = count > 0 ? total / count : null;
-                    ship.summary.isDamaged = damaged;
-                }
-                return ship;
-            }).catch(function () { return null; });
-        }).catch(function () { return null; });
+            }
+            renderFromState();
+        }).catch(function () {});
     }
 
+    function renderFromState() {
+        var compList = [];
+        for (var id in components) { compList.push(components[id]); }
+        var total = 0, count = 0, damaged = false;
+        for (var i = 0; i < compList.length; i++) {
+            var hp = compList[i].healthPercentage;
+            if (hp !== null && hp !== undefined) { total += hp; count++; }
+            if (hp !== null && hp !== undefined && hp < 90) damaged = true;
+        }
+        render({
+            summary: {
+                shipName: shipName,
+                shipType: shipName,
+                overallIntegrity: count > 0 ? total / count : null,
+                isDamaged: damaged
+            },
+            components: compList
+        });
+    }
 
     function healthColor(pct) {
         if (pct === null || pct === undefined) return '#888';
@@ -156,7 +181,7 @@
 
     function createOverlay() {
         isUserHidden = false;
-        if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; schedulePoll(); return; }
+        if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; fetchInitialSnapshot(); return; }
         if (reopenBtn) reopenBtn.style.display = 'none';
         overlayEl = document.createElement('div');
         overlayEl.id = 'oe2-vital-overlay';
@@ -185,7 +210,6 @@
             '<div class="vb"></div>';
         var hud = document.querySelector('#ui-component') || document.body;
         hud.appendChild(overlayEl);
-        // Toggle button
         vtgBtn = document.createElement('span');
         vtgBtn.className = 'vtg';
         vtgBtn.textContent = '\u2295';
@@ -203,9 +227,10 @@
             overlayEl.style.bottom = (window.innerHeight - e.clientY + dragOffY - r.height) + 'px';
         });
         injectStyles();
+        fetchInitialSnapshot();
     }
 
-    function hideOverlay(auto) { if (!overlayEl) return; overlayEl.style.display = 'none'; if (vtgBtn) vtgBtn.style.display = 'none'; isVisible = false; if (pollTimer) clearTimeout(pollTimer); if (!auto) createReopenBtn(); }
+    function hideOverlay(auto) { if (!overlayEl) return; overlayEl.style.display = 'none'; if (vtgBtn) vtgBtn.style.display = 'none'; isVisible = false; if (!auto) createReopenBtn(); }
 
     function createReopenBtn() {
         if (reopenBtn) { reopenBtn.style.display = ''; return; }
@@ -233,7 +258,7 @@
             vtgBtn.textContent = isExpanded ? '\u2296' : '\u2295';
             vtgBtn.title = isExpanded ? 'Show damaged only' : 'Show all';
         }
-        if (lastShipData) render(lastShipData);
+        renderFromState();
     }
 
     function injectStyles() {
@@ -286,17 +311,14 @@
 
     function render(ship) {
         if (!overlayEl) return;
-        lastShipData = ship;
         var body = overlayEl.querySelector('.vb');
         if (!ship) { body.innerHTML = '<div style="color:#888;font-size:12px;">\u2014 waiting\u2014</div>'; return; }
         var sum = ship.summary || {};
         var comps = ship.components || [];
         var nameEl = overlayEl.querySelector('.vln');
         if (nameEl) nameEl.textContent = ' \u2014 ' + (sum.shipName || sum.shipType || '');
-        // Setup list container on first render
         if (!body.querySelector('.vlist')) { body.innerHTML = '<div class="vlist"></div>'; }
         var list = body.querySelector('.vlist');
-        // Build wanted items (if not expanded, only below 65% condition, worst first)
         var wanted = [];
         for (var i = 0; i < comps.length; i++) {
             var c = comps[i];
@@ -328,27 +350,22 @@
             var hb = b.pct !== null ? b.pct : 999;
             return ha - hb;
         });
-        // Count zero-durability components and buzz
         var zeroCount = 0;
         for (var zi = 0; zi < comps.length; zi++) {
             var zh = comps[zi].healthPercentage;
             if (zh !== null && zh !== undefined && Math.round(zh) === 0) zeroCount++;
         }
         if (zeroCount > 0) playBuzz(zeroCount);
-        // Map current DOM items by ID
         var currById = {};
         list.querySelectorAll('.vr').forEach(function (el) { currById[el.getAttribute('data-id') || ''] = el; });
-        // Determine wanted IDs
         var wantedIds = {};
         wanted.forEach(function (w) {
             var id = w.comp.Id !== undefined && w.comp.Id !== null ? '' + w.comp.Id : 'c_' + w.idx;
             w.id = id;
             wantedIds[id] = true;
         });
-        // Find items leaving
         var leaving = [];
         Object.keys(currById).forEach(function (id) { if (!wantedIds[id]) leaving.push(currById[id]); });
-        // Animate out leaving items, then rebuild the full list in sorted order
         if (leaving.length > 0) {
             leaving.forEach(function (el) { el.classList.add('vr-leave'); });
             setTimeout(function () { rebuildList(list, currById, wanted); }, 300);
@@ -414,38 +431,14 @@
         } catch (e) {}
     }
 
-    function poll() {
-        if (!API_BASE || !API_AUTH) {
-            statusMsg('\u2014 awaiting API \u2014');
-            schedulePoll();
-            return;
-        }
-        fetchShipConfig().then(function (data) {
-            if (data !== null) { render(data); schedulePoll(); return; }
-            statusMsg('\u26A0 Config failed');
-            schedulePoll();
-        });
-    }
-
     function statusMsg(msg) {
         if (!overlayEl) return;
         var b = overlayEl.querySelector('.vb');
         if (b) b.innerHTML = '<div style="color:#888;font-size:12px;">' + msg + '</div>';
     }
 
-    function isInInstance() {
-        return !!document.querySelector('#ui-exit-instance');
-    }
-    function schedulePoll() {
-        if (pollTimer) clearTimeout(pollTimer);
-        if (!isVisible || !overlayEl || overlayEl.style.display === 'none') return;
-        var interval = isInInstance() ? 2000 : 25000;
-        pollTimer = setTimeout(poll, interval);
-    }
-
     function start() {
         createOverlay();
-        setTimeout(poll, 500);
     }
 
     document.addEventListener('mousemove', function (e) {
@@ -461,5 +454,4 @@
     function tryStart() { if (started) return; started = true; setTimeout(start, 2000); }
     if (document.readyState === 'complete' || document.readyState === 'interactive') tryStart(); else document.addEventListener('DOMContentLoaded', tryStart);
     window.addEventListener('load', tryStart);
-    window.addEventListener('beforeunload', function () { if (pollTimer) clearTimeout(pollTimer); });
 })();
