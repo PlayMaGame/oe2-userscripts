@@ -43,6 +43,7 @@ Userscripts for [Outer Empires 2](https://outerempires.com/). Requires Tampermon
 | **oe-market-alerts.user.js** | Badge with custom-ship count + chime + click-to-open-market |
 | **oe2-fake-id.user.js** | Fake pilot info card for Twitch follower mails |
 | **oe2-follower-mail.user.js** | Twitch followers auto-sent as real in-game mail via game API |
+| **oe2-scan.user.js** | Real-time target ship component & shield tracking via WebSocket |
 | **outerempires_capture.user.js** | Captures game tab periodically and stores preview snapshot |
 | **outerempires_preview.user.js** | Floating mini-preview of your OE2 game tab on any other tab |
 | **ReloadPage.user.js** | Reload page button (CTRL+R) |
