@@ -19,6 +19,8 @@
     var API_CHAR_ID = localStorage.getItem('_vital_api_char_id') || '';
     var _snapshotFetched = false;
 
+    console.log('[VITAL] v2.0 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
+
     var overlayEl = null;
     var reopenBtn = null;
     var vtgBtn = null;
@@ -41,13 +43,13 @@
                     if (!url || url.indexOf('twitch') !== -1) return;
                     if (url.indexOf('oe2') === -1 && url.indexOf('outerempires') === -1) return;
                     var changed = false;
-                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) { API_BASE = m[1]; localStorage.setItem('_vital_api_base', API_BASE); changed = true; } }
+                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) { API_BASE = m[1]; localStorage.setItem('_vital_api_base', API_BASE); changed = true; console.log('[VITAL] Captured API_BASE:', API_BASE); } }
                     var cm = url.match(/characterId=(\d+)/);
-                    if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_vital_api_char_id', API_CHAR_ID); changed = true; }
+                    if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_vital_api_char_id', API_CHAR_ID); changed = true; console.log('[VITAL] Captured CHAR_ID:', API_CHAR_ID); }
                     var headers = init ? init.headers : (input ? input.headers : {});
                     if (typeof headers === 'object' && !Array.isArray(headers)) {
                         var auth = headers.Authorization || headers.authorization || '';
-                        if (auth && !API_AUTH) { API_AUTH = auth; localStorage.setItem('_vital_api_auth', API_AUTH); changed = true; }
+                        if (auth && !API_AUTH) { API_AUTH = auth; localStorage.setItem('_vital_api_auth', API_AUTH); changed = true; console.log('[VITAL] Captured AUTH token'); }
                     }
                     if (changed && !_snapshotFetched) fetchInitialSnapshot();
                 } catch (e) {}
@@ -59,6 +61,7 @@
     // WebSocket interceptor — captures ShipPartUpdate on any WebSocket (existing or future)
     (function () {
         var origAddListener = EventTarget.prototype.addEventListener;
+        console.log('[VITAL] WebSocket interceptor installed');
         EventTarget.prototype.addEventListener = function (type, listener, options) {
             if (type === 'message' && this instanceof WebSocket) {
                 var self = this;
@@ -113,6 +116,7 @@
         var id = data.componentId || data.ComponentId || data.id || data.Id;
         if (id === undefined || id === null) return;
         id = '' + id;
+        console.log('[VITAL] ShipPartUpdate:', id, (data.healthPercentage !== undefined ? data.healthPercentage + '%' : ''));
         if (components[id]) {
             for (var k in data) { if (data.hasOwnProperty(k)) components[id][k] = data[k]; }
         } else {
@@ -122,19 +126,21 @@
     }
 
     function fetchInitialSnapshot() {
-        if (!API_BASE || !API_AUTH) { setTimeout(fetchInitialSnapshot, 3000); return; }
+        if (!API_BASE || !API_AUTH) { console.log('[VITAL] Waiting for credentials...'); setTimeout(fetchInitialSnapshot, 3000); return; }
         _snapshotFetched = true;
+        console.log('[VITAL] Fetching initial ship snapshot...');
         fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
             headers: { 'Authorization': API_AUTH }
         }).then(function (resp) {
-            if (!resp.ok) return null;
+            if (!resp.ok) { console.log('[VITAL] Snapshot fetch failed:', resp.status); return null; }
             return resp.json();
         }).then(function (body) {
-            if (!body || !body.success) return;
+            if (!body || !body.success) { console.log('[VITAL] Snapshot response invalid'); return; }
             var ships = body.data;
-            if (!Array.isArray(ships) || !ships.length) return;
+            if (!Array.isArray(ships) || !ships.length) { console.log('[VITAL] No ships in snapshot'); return; }
             var ship = ships[0];
             shipName = ship.summary ? (ship.summary.shipName || ship.summary.shipType || '') : '';
+            console.log('[VITAL] Snapshot loaded:', shipName, ship.components ? ship.components.length + ' components' : 'no components');
             if (ship.components) {
                 for (var j = 0; j < ship.components.length; j++) {
                     var c = ship.components[j];
@@ -143,7 +149,7 @@
                 }
             }
             renderFromState();
-        }).catch(function () {});
+        }).catch(function () { console.log('[VITAL] Snapshot fetch error'); });
     }
 
     function renderFromState() {
@@ -213,6 +219,7 @@
     function createOverlay() {
         isUserHidden = false;
         if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; fetchInitialSnapshot(); return; }
+        console.log('[VITAL] Creating overlay');
         if (reopenBtn) reopenBtn.style.display = 'none';
         overlayEl = document.createElement('div');
         overlayEl.id = 'oe2-vital-overlay';
