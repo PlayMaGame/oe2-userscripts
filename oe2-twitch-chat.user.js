@@ -27,6 +27,7 @@
     const SOUND_KEY = 'oe2_ttv_sound';
     let ws = null;
     let reconnectTimer = null;
+    let reconnectAttempts = 0;
     let settingsPanel = null;
     var cachedUsername = '';
     var twitchSound = localStorage.getItem(SOUND_KEY) !== '0';
@@ -126,7 +127,7 @@
     function getSharedToken() {
         try {
             var d = JSON.parse(localStorage.getItem(SHARED_TOKEN_KEY) || 'null');
-            if (d && d.token && d.expiresAt > Date.now()) return d.token;
+            if (d && d.token) return d.token;
         } catch (e) {}
         return null;
     }
@@ -142,6 +143,9 @@
         }).then(function (info) {
             if (info) {
                 cachedUsername = info.login || '';
+                if (cachedUsername) {
+                    localStorage.setItem('_oe2_ttv_user', cachedUsername);
+                }
                 console.log('[OE2 TTV] Token scopes:', info.scopes);
                 if (info.scopes && info.scopes.indexOf('chat:read') === -1) {
                     console.warn('[OE2 TTV] Token missing chat:read scope!');
@@ -356,6 +360,7 @@
         ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
 
         ws.onopen = function () {
+            reconnectAttempts = 0;
             console.log('[OE2 TTV] WebSocket opened, sending IRC login...');
             ws.send('PASS oauth:' + cfg.token);
             ws.send('NICK ' + cfg.username.toLowerCase());
@@ -390,6 +395,18 @@
         ws.onclose = function (e) {
             console.log('[OE2 TTV] Closed code=' + e.code + ' reason=' + e.reason);
             ws = null;
+            var reason = (e.reason || '').toLowerCase();
+            if (reason.indexOf('auth') !== -1 || reason.indexOf('login') !== -1) {
+                setStatus('Authentication failed \u2014 click \u2699 to re-authorize', '#ef5350');
+                reconnectAttempts = 0;
+                return;
+            }
+            reconnectAttempts++;
+            if (reconnectAttempts > 5) {
+                setStatus('Connection failed after ' + reconnectAttempts + ' attempts \u2014 click \u2699 to retry', '#ef5350');
+                reconnectAttempts = 0;
+                return;
+            }
             setStatus('Disconnected \u2014 reconnecting in 5s...', '#ffb300');
             if (!reconnectTimer) {
                 reconnectTimer = setTimeout(function () {
@@ -600,6 +617,7 @@
             if (inp && inp.value.trim()) localStorage.setItem(CFG_KEY.client_id, inp.value.trim());
             localStorage.setItem(CFG_KEY.channel, $('#oe2-ttv-inp-channel', settingsPanel).value.trim());
             settingsPanel.style.display = 'none';
+            reconnectAttempts = 0;
             disconnectTwitch();
             doConnect();
         });

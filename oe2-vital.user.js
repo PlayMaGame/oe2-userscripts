@@ -251,7 +251,9 @@
             '.vt{width:22px;font-size:10px;font-weight:700;text-align:center;flex-shrink:0}' +
             '.vn{flex:1;font-size:13px;font-weight:600;color:#e0e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}' +
             '.vp2{width:30px;text-align:right;font-size:11px;font-weight:700;flex-shrink:0}' +
-            '.vd{display:inline-block;width:6px;height:6px;border-radius:50%;margin:1px}';
+            '.vd{display:inline-block;width:6px;height:6px;border-radius:50%;margin:1px}' +
+            '@keyframes vital-blink{0%,100%{opacity:1;background:rgba(255,0,0,0.4)}50%{opacity:0.2;background:rgba(255,0,0,0.1)}}' +
+            '.vr-zero{animation:vital-blink .6s ease-in-out infinite!important}';
         document.head.appendChild(el);
     }
 
@@ -266,12 +268,16 @@
             if (v !== null && v !== undefined) { mr = Math.round(v); break; }
         }
         var bg = '';
-        if (pct !== null && mr !== null && mr > pct) {
+        var cls = 'vr';
+        if (pct === 0) {
+            col = '#ff0000';
+            cls = 'vr vr-zero';
+        } else if (pct !== null && mr !== null && mr > pct) {
             bg = 'linear-gradient(to right,rgba(102,162,103,0.5) 0%,rgba(102,162,103,0.5) ' + pct + '%,rgba(234,237,137,0.5) ' + pct + '%,rgba(234,237,137,0.5) ' + mr + '%,rgba(166,69,68,0.5) ' + mr + '%,rgba(166,69,68,0.5) 100%)';
         } else if (pct !== null) {
             bg = 'linear-gradient(to right,rgba(102,162,103,0.5) 0%,rgba(102,162,103,0.5) ' + pct + '%,rgba(166,69,68,0.5) ' + pct + '%,rgba(166,69,68,0.5) 100%)';
         }
-        return '<div class="vr" style="background:' + bg + '">' +
+        return '<div class="' + cls + '" style="background:' + bg + '">' +
             '<span class="vt" style="color:' + col + '">' + slotDef.label + '</span>' +
             '<span class="vn" title="' + esc(c.name || '?') + ': ' + (pct !== null ? pct + '%' : '--') + (mr !== null ? ' repair:' + mr + '%' : '') + '">' + esc(c.name || '?') + '</span>' +
             '<span class="vp2" style="color:' + (pct !== null ? col : '#888') + '">' + (pct !== null ? pct + '%' : '--') + '</span>' +
@@ -322,6 +328,13 @@
             var hb = b.pct !== null ? b.pct : 999;
             return ha - hb;
         });
+        // Count zero-durability components and buzz
+        var zeroCount = 0;
+        for (var zi = 0; zi < comps.length; zi++) {
+            var zh = comps[zi].healthPercentage;
+            if (zh !== null && zh !== undefined && Math.round(zh) === 0) zeroCount++;
+        }
+        if (zeroCount > 0) playBuzz(zeroCount);
         // Map current DOM items by ID
         var currById = {};
         list.querySelectorAll('.vr').forEach(function (el) { currById[el.getAttribute('data-id') || ''] = el; });
@@ -380,6 +393,26 @@
     }
 
     function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function playBuzz(count) {
+        try {
+            var ctx = new (window.AudioContext || window.webkitAudioContext)();
+            function buzz(t) {
+                var o = ctx.createOscillator();
+                var g = ctx.createGain();
+                o.type = 'sawtooth';
+                o.frequency.value = 150;
+                g.gain.setValueAtTime(0.02, t);
+                g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.start(t);
+                o.stop(t + 0.35);
+            }
+            buzz(ctx.currentTime);
+            if (count >= 2) buzz(ctx.currentTime + 0.15);
+        } catch (e) {}
+    }
 
     function poll() {
         if (!API_BASE || !API_AUTH) {
