@@ -15,6 +15,8 @@ code { font-size: .8rem; word-break: break-all; }
 .meta { display: flex; flex-direction: column; font-size: .65rem; color: #666; flex-shrink: 0; text-align: right; line-height: 1.3; margin-left: auto; }
 .meta .ver { font-weight: 600; color: #2a6f97; }
 .meta .date { color: #888; }
+.meta .date.fresh { color: #2e7d32; }
+.meta .date.stale { color: #e65100; }
 h2 { margin-top: 2rem; }
 </style>
 </head>
@@ -77,5 +79,8 @@ h2 { margin-top: 2rem; }
 <li><span><code>obs_galaxy_watcher.py</code></span> <a href="https://raw.githubusercontent.com/PlayMaGame/oe2-userscripts/main/%5Bdissabled%5D/obs_galaxy_watcher.py">Raw</a></li>
 </ul>
 <p style="margin-top:2rem;color:#666;font-size:.85rem">Make sure you have <a href="https://www.tampermonkey.net/">Tampermonkey</a> or <a href="https://violentmonkey.github.io/">Violentmonkey</a> installed in Firefox Nightly.</p>
+<script>
+(function(){var d=new Date();document.querySelectorAll('.meta .date').forEach(function(el){var t=el.textContent.trim();if(!t)return;var p=t.split('-');if(p.length!==3)return;var dt=new Date(+p[0],+p[1]-1,+p[2]);var diff=Math.floor((d-dt)/864e5);if(diff<=2)el.classList.add('fresh');else if(diff<=7)el.classList.add('stale');})})();
+</script>
 </body>
 </html>
