@@ -83,43 +83,47 @@
         };
     })();
 
-    // WebSocket interceptor — captures ShipPartUpdate on any WebSocket (existing or future)
+    // WebSocket interceptor — captures ShipPartUpdate on any WebSocket
     (function () {
-        var origAddListener = EventTarget.prototype.addEventListener;
-        console.log('[VITAL] WebSocket interceptor installed');
+        console.log('[VITAL] WebSocket interceptor installing...');
+        var _origETadd = EventTarget.prototype.addEventListener;
         EventTarget.prototype.addEventListener = function (type, listener, options) {
             if (type === 'message' && this instanceof WebSocket) {
                 var self = this;
                 var wrapped = function (e) {
                     try {
-                        var parsed = JSON.parse(e.data);
-                        var msgs = Array.isArray(parsed) ? parsed : [parsed];
-                        for (var i = 0; i < msgs.length; i++) {
-                            var m = msgs[i];
-                            if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
-                                handlePartUpdate(m.data || m.Data || m);
+                        if (typeof e.data === 'string') {
+                            var parsed = JSON.parse(e.data);
+                            var msgs = Array.isArray(parsed) ? parsed : [parsed];
+                            for (var i = 0; i < msgs.length; i++) {
+                                var m = msgs[i];
+                                if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
+                                    handlePartUpdate(m.data || m.Data || m);
+                                }
                             }
                         }
                     } catch (err) {}
-                    if (listener) return listener.apply(self, arguments);
+                    if (typeof listener === 'function') return listener.apply(self, arguments);
+                    else if (listener && typeof listener.handleEvent === 'function') return listener.handleEvent(e);
                 };
-                return origAddListener.call(this, type, wrapped, options);
+                return _origETadd.call(this, type, wrapped, options);
             }
-            return origAddListener.apply(this, arguments);
+            return _origETadd.apply(this, arguments);
         };
-        // Also intercept onmessage setter — game may use this instead of addEventListener
-        var wp = WebSocket.prototype;
-        if (wp) {
-            var desc = Object.getOwnPropertyDescriptor(wp, 'onmessage');
-            if (desc && desc.configurable) {
-                Object.defineProperty(wp, 'onmessage', {
-                    configurable: true, enumerable: true,
-                    get: function () { return this.__vital_om; },
-                    set: function (fn) {
-                        this.__vital_om = fn;
-                        var self = this;
-                        origAddListener.call(this, 'message', function (e) {
-                            try {
+        // Wrap WebSocket constructor to intercept per-instance (handles onmessage)
+        var _origWS = window.WebSocket;
+        window.WebSocket = function (url, protocols) {
+            if (!(this instanceof window.WebSocket)) return new window.WebSocket(url, protocols);
+            var ws = new _origWS(url, protocols);
+            Object.defineProperty(ws, 'onmessage', {
+                configurable: true, enumerable: true,
+                get: function () { return this.__vital_om; },
+                set: function (fn) {
+                    this.__vital_om = fn;
+                    var self = this;
+                    _origETadd.call(ws, 'message', function (e) {
+                        try {
+                            if (typeof e.data === 'string') {
                                 var parsed = JSON.parse(e.data);
                                 var msgs = Array.isArray(parsed) ? parsed : [parsed];
                                 for (var i = 0; i < msgs.length; i++) {
@@ -128,13 +132,20 @@
                                         handlePartUpdate(m.data || m.Data || m);
                                     }
                                 }
-                            } catch (err) {}
-                            if (self.__vital_om) self.__vital_om.call(self, e);
-                        });
-                    }
-                });
-            }
-        }
+                            }
+                        } catch (err) {}
+                        if (self.__vital_om) self.__vital_om.call(self, e);
+                    });
+                }
+            });
+            return ws;
+        };
+        window.WebSocket.prototype = _origWS.prototype;
+        window.WebSocket.CONNECTING = 0;
+        window.WebSocket.OPEN = 1;
+        window.WebSocket.CLOSING = 2;
+        window.WebSocket.CLOSED = 3;
+        console.log('[VITAL] WebSocket interceptor installed');
     })();
 
     function handlePartUpdate(data) {
