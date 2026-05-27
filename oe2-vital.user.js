@@ -14,9 +14,9 @@
     var POS_KEY = 'oe2_vital_pos';
     var SLOTS = { Weapons: { label: 'WPN' }, Turrets: { label: 'TRT' }, Engines: { label: 'ENG' }, Core: { label: 'CORE' }, Shields: { label: 'SHD' }, Ammo: { label: 'AMMO' } };
 
-    var API_BASE = localStorage.getItem('_vital_api_base') || '';
-    var API_AUTH = localStorage.getItem('_vital_api_auth') || '';
-    var API_CHAR_ID = localStorage.getItem('_vital_api_char_id') || '';
+    var API_BASE = localStorage.getItem('_oe2_api_base') || '';
+    var API_AUTH = localStorage.getItem('_oe2_api_auth') || '';
+    var API_CHAR_ID = localStorage.getItem('_oe2_api_char_id') || '';
     var _snapshotFetched = false;
 
     console.log('[VITAL] v2.0 loaded' + (API_BASE ? ' (cached creds)' : ' (awaiting creds)'));
@@ -32,7 +32,7 @@
     var components = {};
     var shipName = '';
 
-    // Credential capture from game traffic + localStorage persistence
+    // Credential capture from game traffic + localStorage persistence (shared with other OE2 scripts)
     (function () {
         var origFetch = window.fetch;
         window.fetch = function (input, init) {
@@ -43,18 +43,43 @@
                     if (!url || url.indexOf('twitch') !== -1) return;
                     if (url.indexOf('oe2') === -1 && url.indexOf('outerempires') === -1) return;
                     var changed = false;
-                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) { API_BASE = m[1]; localStorage.setItem('_vital_api_base', API_BASE); changed = true; console.log('[VITAL] Captured API_BASE:', API_BASE); } }
+                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) { API_BASE = m[1]; localStorage.setItem('_oe2_api_base', API_BASE); changed = true; } }
                     var cm = url.match(/characterId=(\d+)/);
-                    if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_vital_api_char_id', API_CHAR_ID); changed = true; console.log('[VITAL] Captured CHAR_ID:', API_CHAR_ID); }
+                    if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_oe2_api_char_id', API_CHAR_ID); changed = true; }
                     var headers = init ? init.headers : (input ? input.headers : {});
                     if (typeof headers === 'object' && !Array.isArray(headers)) {
                         var auth = headers.Authorization || headers.authorization || '';
-                        if (auth && !API_AUTH) { API_AUTH = auth; localStorage.setItem('_vital_api_auth', API_AUTH); changed = true; console.log('[VITAL] Captured AUTH token'); }
+                        if (auth && !API_AUTH) { API_AUTH = auth; localStorage.setItem('_oe2_api_auth', API_AUTH); changed = true; }
                     }
+                    if (changed) console.log('[VITAL] Credentials ready');
                     if (changed && !_snapshotFetched) fetchInitialSnapshot();
                 } catch (e) {}
             });
             return r;
+        };
+        // Also capture from XHR (game may use this for some calls)
+        var _open = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            this._vitalUrl = url;
+            return _open.apply(this, arguments);
+        };
+        var _setH = XMLHttpRequest.prototype.setRequestHeader;
+        XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+            var u = this._vitalUrl || '';
+            if (u.indexOf('oe2') !== -1 || u.indexOf('outerempires') !== -1) {
+                if (u.indexOf('twitch') === -1 && k.toLowerCase() === 'authorization' && !API_AUTH) {
+                    API_AUTH = v;
+                    localStorage.setItem('_oe2_api_auth', API_AUTH);
+                    console.log('[VITAL] Credentials ready (XHR)');
+                }
+                if (!API_BASE) {
+                    var m = u.match(/^(https:\/\/[^/]+)/);
+                    if (m) { API_BASE = m[1]; localStorage.setItem('_oe2_api_base', API_BASE); }
+                }
+                var cm = u.match(/characterId=(\d+)/);
+                if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_oe2_api_char_id', API_CHAR_ID); }
+            }
+            return _setH.apply(this, arguments);
         };
     })();
 
