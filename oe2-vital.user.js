@@ -142,10 +142,15 @@
         if (id === undefined || id === null) return;
         id = '' + id;
         console.log('[VITAL] ShipPartUpdate:', id, (data.healthPercentage !== undefined ? data.healthPercentage + '%' : ''));
+        var oldHP = components[id] ? components[id].healthPercentage : undefined;
         if (components[id]) {
             for (var k in data) { if (data.hasOwnProperty(k)) components[id][k] = data[k]; }
         } else {
             components[id] = JSON.parse(JSON.stringify(data));
+        }
+        var newHP = components[id].healthPercentage;
+        if (oldHP !== undefined && newHP !== undefined && newHP < oldHP) {
+            components[id]._damageFlash = Date.now();
         }
         renderFromState();
     }
@@ -179,7 +184,13 @@
 
     function renderFromState() {
         var compList = [];
-        for (var id in components) { compList.push(components[id]); }
+        var now = Date.now();
+        for (var id in components) {
+            if (components[id]._damageFlash && now - components[id]._damageFlash > 1000) {
+                delete components[id]._damageFlash;
+            }
+            compList.push(components[id]);
+        }
         var total = 0, count = 0, damaged = false;
         for (var i = 0; i < compList.length; i++) {
             var hp = compList[i].healthPercentage;
@@ -329,7 +340,9 @@
             '.vp2{width:30px;text-align:right;font-size:11px;font-weight:700;flex-shrink:0}' +
             '.vd{display:inline-block;width:6px;height:6px;border-radius:50%;margin:1px}' +
             '@keyframes vital-blink{0%,100%{opacity:1;background:rgba(255,0,0,0.4)}50%{opacity:0.2;background:rgba(255,0,0,0.1)}}' +
-            '.vr-zero{animation:vital-blink .6s ease-in-out infinite!important}';
+            '.vr-zero{animation:vital-blink .6s ease-in-out infinite!important}' +
+            '@keyframes vital-dmg-flash{0%{box-shadow:inset 0 0 0 0 transparent}25%{box-shadow:inset 0 0 18px 4px rgba(255,140,0,0.55)}to{box-shadow:inset 0 0 0 0 transparent}}' +
+            '.vr-dmg-flash{animation:vital-dmg-flash .5s ease-out forwards!important}';
         document.head.appendChild(el);
     }
 
@@ -353,6 +366,7 @@
         } else if (pct !== null) {
             bg = 'linear-gradient(to right,rgba(102,162,103,0.5) 0%,rgba(102,162,103,0.5) ' + pct + '%,rgba(166,69,68,0.5) ' + pct + '%,rgba(166,69,68,0.5) 100%)';
         }
+        if (c._damageFlash && Date.now() - c._damageFlash < 500) cls += ' vr-dmg-flash';
         return '<div class="' + cls + '" style="background:' + bg + '">' +
             '<span class="vt" style="color:' + col + '">' + slotDef.label + '</span>' +
             '<span class="vn" title="' + esc(c.name || '?') + ': ' + (pct !== null ? pct + '%' : '--') + (mr !== null ? ' repair:' + mr + '%' : '') + '">' + esc(c.name || '?') + '</span>' +
