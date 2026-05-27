@@ -234,16 +234,9 @@
         return 'Core';
     }
 
-    function positionVtg() {
-        if (!vtgBtn || !overlayEl) return;
-        var r = overlayEl.getBoundingClientRect();
-        vtgBtn.style.right = (window.innerWidth - r.right - 20) + 'px';
-        vtgBtn.style.bottom = (window.innerHeight - r.bottom - 2) + 'px';
-    }
-
     function createOverlay() {
         isUserHidden = false;
-        if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; positionVtg(); isVisible = true; fetchInitialSnapshot(); return; }
+        if (overlayEl) { overlayEl.style.display = ''; if (vtgBtn) vtgBtn.style.display = ''; isVisible = true; fetchInitialSnapshot(); return; }
         console.log('[VITAL] Creating overlay');
         if (reopenBtn) reopenBtn.style.display = 'none';
         overlayEl = document.createElement('div');
@@ -269,17 +262,12 @@
         overlayEl.innerHTML =
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
             '<span style="font-size:11px;font-weight:700;color:#7ecfff;letter-spacing:.5px;">\u25C6 VITAL <span class="vln" style="color:#e0e8f0;letter-spacing:0;"></span></span>' +
+            '<span class="vtg" style="color:#7ecfff;cursor:pointer;font-size:13px;line-height:1;user-select:none;opacity:0.6;" title="Show all">\u2295</span>' +
             '</div>' +
             '<div class="vb"></div>';
         var hud = document.querySelector('#ui-component') || document.body;
         hud.appendChild(overlayEl);
-        vtgBtn = document.createElement('span');
-        vtgBtn.className = 'vtg';
-        vtgBtn.textContent = '\u2295';
-        vtgBtn.title = 'Show all';
-        vtgBtn.style.cssText = 'position:fixed;z-index:9999;color:#546e7a;cursor:pointer;font-size:14px;padding:2px;user-select:none;';
-        hud.appendChild(vtgBtn);
-        positionVtg();
+        vtgBtn = overlayEl.querySelector('.vtg');
         vtgBtn.addEventListener('click', toggleExpand);
         isVisible = true;
         overlayEl.addEventListener('mousedown', function (e) {
@@ -329,7 +317,7 @@
         var el = document.createElement('style');
         el.id = 'vital-st';
         el.textContent = "@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');" +
-            '.vtg:hover{color:#4dd0e1!important}' +
+            '.vtg:hover{opacity:1!important;color:#4dd0e1!important}' +
             '.vlist{overflow:hidden}' +
             '.vr{display:flex;align-items:center;gap:4px;padding:2px 0;transition:all 0.3s ease;overflow:hidden;min-width:0}' +
             '#oe2-vital-overlay .vr:hover{background:rgba(255,255,255,0.02)}' +
@@ -465,10 +453,7 @@
                     el.classList.remove('vr-enter');
                     el.classList.remove('vr-enter-active');
                 });
-                positionVtg();
             }, 400);
-        } else {
-            positionVtg();
         }
     }
 
@@ -508,9 +493,8 @@
         if (!isDragging || !overlayEl) return;
         overlayEl.style.left = (e.clientX - dragOffX) + 'px';
         overlayEl.style.bottom = (window.innerHeight - (e.clientY - dragOffY) - overlayEl.offsetHeight) + 'px';
-        positionVtg();
     });
-    document.addEventListener('mouseup', function () { if (isDragging && overlayEl) { isDragging = false; overlayEl.style.cursor = ''; positionVtg(); var r = overlayEl.getBoundingClientRect(); localStorage.setItem(POS_KEY, JSON.stringify({ x: r.left, y: window.innerHeight - r.bottom })); } });
+    document.addEventListener('mouseup', function () { if (isDragging && overlayEl) { isDragging = false; overlayEl.style.cursor = ''; var r = overlayEl.getBoundingClientRect(); localStorage.setItem(POS_KEY, JSON.stringify({ x: r.left, y: window.innerHeight - r.bottom })); } });
     document.addEventListener('keydown', function (e) { if (e.altKey && e.key === 'v') { e.preventDefault(); if (isVisible && overlayEl && overlayEl.style.display !== 'none') { isUserHidden = true; hideOverlay(); } else { isUserHidden = false; createOverlay(); } } });
 
     var started = false;
