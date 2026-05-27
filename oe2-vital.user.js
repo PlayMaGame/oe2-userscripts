@@ -14,9 +14,10 @@
     var POS_KEY = 'oe2_vital_pos';
     var SLOTS = { Weapons: { label: 'WPN' }, Turrets: { label: 'TRT' }, Engines: { label: 'ENG' }, Core: { label: 'CORE' }, Shields: { label: 'SHD' }, Ammo: { label: 'AMMO' } };
 
-    var API_BASE = '';
-    var API_AUTH = '';
-    var API_CHAR_ID = '';
+    var API_BASE = localStorage.getItem('_vital_api_base') || '';
+    var API_AUTH = localStorage.getItem('_vital_api_auth') || '';
+    var API_CHAR_ID = localStorage.getItem('_vital_api_char_id') || '';
+    var _snapshotFetched = false;
 
     var overlayEl = null;
     var reopenBtn = null;
@@ -29,7 +30,7 @@
     var components = {};
     var shipName = '';
 
-    // Minimal credential capture (just for initial snapshot)
+    // Credential capture from game traffic + localStorage persistence
     (function () {
         var origFetch = window.fetch;
         window.fetch = function (input, init) {
@@ -39,44 +40,73 @@
                     var url = typeof input === 'string' ? input : input ? input.url : '';
                     if (!url || url.indexOf('twitch') !== -1) return;
                     if (url.indexOf('oe2') === -1 && url.indexOf('outerempires') === -1) return;
-                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) API_BASE = m[1]; }
+                    var changed = false;
+                    if (!API_BASE) { var m = url.match(/^(https:\/\/[^/]+)/); if (m) { API_BASE = m[1]; localStorage.setItem('_vital_api_base', API_BASE); changed = true; } }
                     var cm = url.match(/characterId=(\d+)/);
-                    if (cm) API_CHAR_ID = cm[1];
+                    if (cm) { API_CHAR_ID = cm[1]; localStorage.setItem('_vital_api_char_id', API_CHAR_ID); changed = true; }
                     var headers = init ? init.headers : (input ? input.headers : {});
                     if (typeof headers === 'object' && !Array.isArray(headers)) {
                         var auth = headers.Authorization || headers.authorization || '';
-                        if (auth && !API_AUTH) API_AUTH = auth;
+                        if (auth && !API_AUTH) { API_AUTH = auth; localStorage.setItem('_vital_api_auth', API_AUTH); changed = true; }
                     }
+                    if (changed && !_snapshotFetched) fetchInitialSnapshot();
                 } catch (e) {}
             });
             return r;
         };
     })();
 
-    // WebSocket interceptor — capture ShipPartUpdate messages
+    // WebSocket interceptor — captures ShipPartUpdate on any WebSocket (existing or future)
     (function () {
-        var OrigWS = window.WebSocket;
-        window.WebSocket = function (url, protocols) {
-            var ws = new OrigWS(url, protocols);
-            ws.addEventListener('message', function (e) {
-                try {
-                    var parsed = JSON.parse(e.data);
-                    var msgs = Array.isArray(parsed) ? parsed : [parsed];
-                    for (var i = 0; i < msgs.length; i++) {
-                        var m = msgs[i];
-                        if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
-                            handlePartUpdate(m.data || m.Data || m);
+        var origAddListener = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function (type, listener, options) {
+            if (type === 'message' && this instanceof WebSocket) {
+                var self = this;
+                var wrapped = function (e) {
+                    try {
+                        var parsed = JSON.parse(e.data);
+                        var msgs = Array.isArray(parsed) ? parsed : [parsed];
+                        for (var i = 0; i < msgs.length; i++) {
+                            var m = msgs[i];
+                            if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
+                                handlePartUpdate(m.data || m.Data || m);
+                            }
                         }
-                    }
-                } catch (err) {}
-            });
-            return ws;
+                    } catch (err) {}
+                    if (listener) return listener.apply(self, arguments);
+                };
+                return origAddListener.call(this, type, wrapped, options);
+            }
+            return origAddListener.apply(this, arguments);
         };
-        window.WebSocket.prototype = OrigWS.prototype;
-        window.WebSocket.CONNECTING = 0;
-        window.WebSocket.OPEN = 1;
-        window.WebSocket.CLOSING = 2;
-        window.WebSocket.CLOSED = 3;
+        // Also intercept onmessage setter — game may use this instead of addEventListener
+        var wp = WebSocket.prototype;
+        if (wp) {
+            var desc = Object.getOwnPropertyDescriptor(wp, 'onmessage');
+            if (desc && desc.configurable) {
+                Object.defineProperty(wp, 'onmessage', {
+                    configurable: true, enumerable: true,
+                    get: function () { return this.__vital_om; },
+                    set: function (fn) {
+                        this.__vital_om = fn;
+                        var self = this;
+                        origAddListener.call(this, 'message', function (e) {
+                            try {
+                                var parsed = JSON.parse(e.data);
+                                var msgs = Array.isArray(parsed) ? parsed : [parsed];
+                                for (var i = 0; i < msgs.length; i++) {
+                                    var m = msgs[i];
+                                    if (m.type === 'ShipPartUpdate' || m.Type === 'ShipPartUpdate') {
+                                        handlePartUpdate(m.data || m.Data || m);
+                                    }
+                                }
+                            } catch (err) {}
+                            if (self.__vital_om) self.__vital_om.call(self, e);
+                        });
+                    }
+                });
+            }
+        }
     })();
 
     function handlePartUpdate(data) {
@@ -92,7 +122,8 @@
     }
 
     function fetchInitialSnapshot() {
-        if (!API_BASE || !API_AUTH) { statusMsg('\u2014 awaiting API \u2014'); return; }
+        if (!API_BASE || !API_AUTH) { setTimeout(fetchInitialSnapshot, 3000); return; }
+        _snapshotFetched = true;
         fetch(API_BASE + '/v1/character/' + API_CHAR_ID + '/availableShips', {
             headers: { 'Authorization': API_AUTH }
         }).then(function (resp) {
