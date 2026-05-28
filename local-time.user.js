@@ -22,7 +22,7 @@
         name.textContent = 'Twitch.tv/WekizZ';
 
         const info = document.createElement('span');
-        info.style.cssText = 'display:flex;align-items:center;gap:6px;opacity:.9;margin-left:300px;';
+        info.style.cssText = 'display:flex;align-items:center;gap:6px;opacity:.9;margin-left:100px;';
 
         const timeSpan = document.createElement('span');
         timeSpan.className = CUSTOM_ID + '-time';
